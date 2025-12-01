@@ -1,0 +1,40 @@
+<%- include('partials/head') %>
+</head>
+
+<body class="bg-gray-100 min-h-screen">
+
+  <!-- Navbar -->
+  <%- include('partials/nav') %>
+
+  <main class="container mx-auto mt-16 flex justify-center">
+    <div class="bg-white p-8 rounded-lg shadow-lg text-center w-full max-w-md">
+
+      <h1 class="text-3xl font-bold mb-6 text-gray-800">Login</h1>
+
+      <form action="/host/loginAdded" method="POST">
+
+        <label class="block text-left font-semibold mb-1">Username</label>
+        <input type="text" name="username" class="w-full border rounded p-2 mb-4" placeholder="Enter username">
+
+        <label class="block text-left font-semibold mb-1">Email</label>
+        <input type="email" name="email" class="w-full border rounded p-2 mb-4" placeholder="Enter email">
+
+        <label class="block text-left font-semibold mb-1">Password</label>
+        <input type="password" name="password" class="w-full border rounded p-2 mb-4" placeholder="Enter password">
+
+        <button class="w-full bg-green-500 hover:bg-green-600 text-white py-2 rounded-md">
+          Login
+        </button>
+
+      </form>
+
+      <p class="mt-4 text-sm">
+        Don't have an account?
+        <a href="/" class="text-blue-600 hover:underline">Signup here</a>
+      </p>
+
+    </div>
+  </main>
+
+</body>
+</html>

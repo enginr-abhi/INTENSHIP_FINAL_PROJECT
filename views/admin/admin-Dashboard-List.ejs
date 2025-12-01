@@ -1,0 +1,60 @@
+<%- include('../partials/head') %>
+</head>
+
+<body class="bg-gray-100 min-h-screen">
+
+  <!-- NAVBAR -->
+  <%- include('../partials/nav') %>
+
+
+  <!-- RIGHT FIXED SIDEBAR -->
+  <div class="fixed top-0 right-0 w-64 h-full bg-[#1E1E2E] text-white shadow-xl z-50 p-5">
+
+    <h2 class="text-xl font-bold flex items-center gap-2 mb-4">
+      <span class="h-3 w-3 bg-green-400 rounded-full"></span>
+      Online Users
+    </h2>
+
+    <div class="space-y-3 max-h-[calc(100%-80px)] overflow-y-auto">
+      <% users.forEach(user => { %>
+        <div class="bg-[#2A2A3A] p-3 rounded-lg border border-gray-700 hover:border-blue-400 transition">
+          <div class="text-sm font-bold"><%= user.username %></div>
+
+          <div class="text-[11px] text-gray-400 break-words"><%= user.email %></div>
+        </div>
+      <% }) %>
+    </div>
+  </div>
+
+
+  <!-- MAIN DASHBOARD CONTENT -->
+  <main class="ml-10 mr-72 py-12">
+    <div class="bg-white p-10 rounded-xl shadow-xl w-[600px] mx-auto">
+      
+      <h1 class="text-4xl font-bold text-gray-800 mb-4 text-center">
+        Welcome to Dashboard
+      </h1>
+
+      <h2 class="text-lg font-bold text-gray-800 mb-4 text-center">
+        Active Users (<%= users.length %>)
+      </h2>
+
+      <div class="space-y-4">
+        <% users.forEach(user => { %>
+          <div class="bg-gray-50 p-4 rounded-lg border border-gray-200">
+            <div class="text-xs text-gray-500 uppercase">Username</div>
+            <div class="text-sm font-bold"><%= user.username %></div>
+           <a href="/host/dashboard/<%= user.id %>">Details</a>
+            <div class="text-xs text-gray-500 uppercase mt-2">Email</div>
+            <div class="text-xs"><%= user.email %></div>
+          </div>
+        <% }) %>
+      </div>
+
+    </div>
+  </main>
+
+</body>
+
+
+</html>
