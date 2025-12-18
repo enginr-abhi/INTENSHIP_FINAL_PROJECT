@@ -1,60 +1,95 @@
 <%- include('../partials/head') %>
 </head>
 
-<body class="bg-gray-100 min-h-screen">
+<body
+  class="bg-gray-100 min-h-screen"
+  data-user-id="<%= user._id %>"
+  data-user-name="<%= user.firstName %> <%= user.lastName %>"
+>
 
-  <!-- NAVBAR -->
-  <%- include('../partials/nav') %>
+<%- include('../partials/nav') %>
 
+<div class="bg-blue-100 text-blue-700 p-3 border-l-4 border-blue-500 mb-5 text-lg font-semibold">
+  Welcome, <%= user.firstName %> <%= user.lastName %> 👋
+</div>
 
-  <!-- RIGHT FIXED SIDEBAR -->
-  <div class="fixed top-0 right-0 w-64 h-full bg-[#1E1E2E] text-white shadow-xl z-50 p-5">
+<!-- (optional) hidden span — harmless -->
+<span id="current-user-id" 
+      data-user-id="<%= user._id %>" 
+      data-user-name="<%= user.firstName %> <%= user.lastName %>"
+      class="hidden"></span>
 
-    <h2 class="text-xl font-bold flex items-center gap-2 mb-4">
-      <span class="h-3 w-3 bg-green-400 rounded-full"></span>
-      Online Users
-    </h2>
+<div class="p-5 max-w-4xl mx-auto">
 
-    <div class="space-y-3 max-h-[calc(100%-80px)] overflow-y-auto">
-      <% users.forEach(user => { %>
-        <div class="bg-[#2A2A3A] p-3 rounded-lg border border-gray-700 hover:border-blue-400 transition">
-          <div class="text-sm font-bold"><%= user.username %></div>
-
-          <div class="text-[11px] text-gray-400 break-words"><%= user.email %></div>
-        </div>
-      <% }) %>
-    </div>
+  <!-- Incoming Request -->
+  <div
+    id="incoming-request-container"
+    class="hidden bg-yellow-100 border-l-4 border-yellow-500 text-yellow-700 p-4 mb-5">
   </div>
 
+  <!-- Viewer Screen
+  <div id="remote-stream-container" class="hidden mb-5">
+    <h3 class="text-xl font-semibold mb-3">Viewing Shared Screen</h3>
+    <img
+      id="remote-video"
+      src=""
+      class="w-full h-auto min-h-[300px]"/>
+      <div id="status-text" class="absolute inset-0 flex items-center justify-center text-white bg-black bg-opacity-50">
+            Connecting to Agent...
+        </div>
+  </div> -->
 
-  <!-- MAIN DASHBOARD CONTENT -->
-  <main class="ml-10 mr-72 py-12">
-    <div class="bg-white p-10 rounded-xl shadow-xl w-[600px] mx-auto">
-      
-      <h1 class="text-4xl font-bold text-gray-800 mb-4 text-center">
-        Welcome to Dashboard
-      </h1>
+  <!-- Sharer Screen -->
+  <!-- <div id="local-stream-container" class="hidden mb-5">
+    <h3 class="text-xl font-semibold mb-3">Your Screen (Being Shared)</h3>
+    <video
+      id="local-video"
+       src=""
+      class="w-full h-auto min-h-[300px]" />
+    <button
+      id="stop-sharing-btn"
+      class="mt-2 bg-red-500 text-white px-4 py-2 rounded">
+      Stop Sharing
+    </button>
+  </div> -->
+</div>
 
-      <h2 class="text-lg font-bold text-gray-800 mb-4 text-center">
-        Active Users (<%= users.length %>)
-      </h2>
+<!-- RIGHT SIDEBAR -->
+<div class="fixed top-0 right-0 w-64 h-full bg-[#1E1E2E] text-white shadow-xl z-50 p-5">
 
-      <div class="space-y-4">
-        <% users.forEach(user => { %>
-          <div class="bg-gray-50 p-4 rounded-lg border border-gray-200">
-            <div class="text-xs text-gray-500 uppercase">Username</div>
-            <div class="text-sm font-bold"><%= user.username %></div>
-           <a href="/host/dashboard/<%= user.id %>">Details</a>
-            <div class="text-xs text-gray-500 uppercase mt-2">Email</div>
-            <div class="text-xs"><%= user.email %></div>
-          </div>
-        <% }) %>
+  <h2 class="text-xl font-bold flex items-center gap-2 mb-4">
+    <span class="h-3 w-3 bg-green-400 rounded-full"></span>
+    Online Users
+  </h2>
+
+  <div
+    id="active-users-list"
+    class="space-y-3 max-h-[calc(100%-80px)] overflow-y-auto">
+
+    <% if (users.length > 0) { %>
+      <% users.forEach(u => { %>
+        <div class="bg-[#2A2A3A] p-3 rounded-lg flex justify-between items-center">
+          <span><%= u.firstName %> <%= u.lastName %></span>
+
+          <button
+            class="request-btn bg-blue-600 hover:bg-blue-700 text-white px-3 py-1.5 rounded-md text-xs font-medium shadow-md transition-all duration-200"
+            data-target-id="<%= u._id %>">
+            Request ScreenShare
+          </button>
+        </div>
+      <% }) %>
+    <% } else { %>
+      <div class="text-gray-400 bg-[#2A2A3A] p-3 rounded-lg text-center">
+        No users online
       </div>
+    <% } %>
 
-    </div>
-  </main>
+  </div>
+</div>
+
+<script src="/socket.io/socket.io.js"></script>
+<script src="/js/socket.js"></script>
+<script src="/js/dashboard.js"></script>
 
 </body>
-
-
 </html>

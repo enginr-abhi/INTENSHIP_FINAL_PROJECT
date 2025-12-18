@@ -1,0 +1,68 @@
+<%- include('../partials/head') %>
+</head>
+
+<body class="bg-gray-100 min-h-screen">
+
+  <!-- NAVBAR -->
+  <%- include('../partials/nav') %>
+
+
+  <!-- RIGHT FIXED SIDEBAR -->
+  <div class="fixed top-0 right-0 w-64 h-full bg-[#1E1E2E] text-white shadow-xl z-50 p-5">
+
+    <h2 class="text-xl font-bold flex items-center gap-2 mb-4">
+      <span class="h-3 w-3 bg-green-400 rounded-full"></span>
+      Online Users
+    </h2>
+
+    <div class="space-y-3 max-h-[calc(100%-80px)] overflow-y-auto">
+      <% registerdUsers.forEach(user => { %>
+    <div class="bg-[#2A2A3A] p-3 rounded-lg border border-gray-700 hover:border-blue-400 transition user-card">
+
+  <div class="text-sm font-bold flex justify-between items-center">
+    <span><%= user.firstName %> <%= user.lastName %></span>
+
+    <button 
+      class="bg-green-500 px-2 py-1 rounded text-xs request-btn">
+      Request Screen
+    </button>
+  </div>
+
+  <div class="text-sm font-bold flex justify-between items-center">
+    <a href="/dashboard/<%= user.id %>" class="bg-blue-500 px-2 py-1 rounded text-xs request-btn">Details</a>
+    <div class="mt-8">
+      <%- include('../partials/favourite',{user:user}) %>
+    </div>
+  </div>
+</div>
+      <% }) %>
+    </div>
+  </div>
+  
+
+
+  <!-- MAIN DASHBOARD CONTENT -->
+  <main class="ml-10 mr-72 py-12">
+    <div id="perm" class="perm-box">
+      <div id="permText">Peer wants to view your screen</div>
+      <div class="actions">
+        <button class="btn-ok" id="acceptBtn">Accept</button>
+        <button class="btn-no" id="rejectBtn">Reject</button>
+      </div>
+    </div>
+
+        <div class="videos">
+      <video id="local" autoplay muted playsinline></video>
+      <div class="remote-wrapper">
+        <!-- <video id="remote" autoplay playsinline></video> -->
+        <img id="remoteScreen" alt="Remote Screen" style="display: block;">
+        <button id="fullscreenBtn">⛶</button>
+        <!-- 💡 NOTE: this button now work as 'stopBtn' to come out from  immersive mode -->
+      </div>
+    </div>
+  </main>
+
+</body>
+
+
+</html>

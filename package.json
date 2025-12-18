@@ -13,9 +13,16 @@
   "license": "ISC",
   "type": "commonjs",
   "dependencies": {
+    "bcryptjs": "^3.0.3",
     "body-parser": "^2.2.1",
+    "connect-mongodb-session": "^5.0.0",
     "ejs": "^3.1.10",
-    "express": "^5.1.0"
+    "express": "^5.1.0",
+    "express-session": "^1.18.2",
+    "express-validator": "^7.3.1",
+    "mongodb": "^7.0.0",
+    "mongoose": "^9.0.1",
+    "socket.io": "^4.8.1"
   },
   "devDependencies": {
     "autoprefixer": "^10.4.22",

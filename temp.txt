@@ -1,0 +1,490 @@
+// agent.cpp — FINAL READY-TO-USE VERSION (Includes Dynamic ID, Full Control, and Key Mapping)
+
+#include <winsock2.h>
+#include <windows.h>
+#include <gdiplus.h>
+#include <iostream>
+#include <vector>
+#include <thread>
+#include <string>
+#include <sstream>
+#include <map>
+#include <cmath>
+#include "json.hpp" // Ensure json.hpp is in the same folder!
+
+#pragma comment(lib, "Ws2_32.lib")
+#pragma comment(lib, "Gdiplus.lib")
+
+using namespace Gdiplus;
+using json = nlohmann::json;
+
+// ================= GLOBAL VARIABLES & UTILS =================
+SOCKET sockGlobal;
+bool isConnected = false;
+std::string targetViewerId = ""; 
+std::string agentUserId = ""; 
+
+// Screen Metrics (Assuming the Sharer's screen size for accurate mouse control scaling)
+int screenWidth = GetSystemMetrics(SM_CXSCREEN);
+int screenHeight = GetSystemMetrics(SM_CYSCREEN);
+
+// Viewer's Virtual Screen Resolution (Used for inverse scaling)
+const int VIEWER_VIRTUAL_WIDTH = 1920; 
+const int VIEWER_VIRTUAL_HEIGHT = 1080;
+
+
+// ================= ID PARSING FUNCTION =================
+
+std::string get_user_id_from_url(const std::string& url) {
+    size_t start_pos = url.find("user_id=");
+    if (start_pos == std::string::npos) {
+        return ""; 
+    }
+    start_pos += 8; // Length of "user_id="
+    
+    size_t end_pos = url.find('&', start_pos);
+    if (end_pos == std::string::npos) {
+        end_pos = url.length();
+    }
+    
+    std::string userId = url.substr(start_pos, end_pos - start_pos);
+    // Clean up trailing quotes if present
+    if (!userId.empty() && userId.back() == '"') {
+        userId.pop_back();
+    }
+    return userId;
+}
+
+// ================= BASE64 / JPEG ENCODER =================
+
+std::string base64_encode(const unsigned char* data, int len) {
+    static const char tbl[] =
+        "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+    std::string out;
+    int val = 0, valb = -6;
+    for (int i = 0; i < len; i++) {
+        val = (val << 8) + data[i];
+        valb += 8;
+        while (valb >= 0) {
+            out.push_back(tbl[(val >> valb) & 63]);
+            valb -= 6;
+        }
+    }
+    if (valb > -6) out.push_back(tbl[((val << 8) >> (valb + 8)) & 63]);
+    while (out.size() % 4) out.push_back('=');
+    return out;
+}
+
+std::string random_key() {
+    unsigned char temp[16];
+    for (int i = 0; i < 16; i++) temp[i] = rand() % 255;
+    return base64_encode(temp, 16);
+}
+
+CLSID jpegClsid;
+
+void init_jpeg() {
+    UINT num, size;
+    GetImageEncodersSize(&num, &size);
+    auto* info = (ImageCodecInfo*)malloc(size);
+    GetImageEncoders(num, size, info);
+    for (UINT i = 0; i < num; i++) {
+        if (wcscmp(info[i].MimeType, L"image/jpeg") == 0) {
+            jpegClsid = info[i].Clsid;
+            break;
+        }
+    }
+    free(info);
+}
+
+bool capture_screen(std::vector<unsigned char>& out) {
+    HDC hScreen = GetDC(NULL);
+    HDC hDC = CreateCompatibleDC(hScreen);
+    HBITMAP hBitmap = CreateCompatibleBitmap(hScreen, screenWidth, screenHeight);
+    SelectObject(hDC, hBitmap);
+
+    BitBlt(hDC, 0, 0, screenWidth, screenHeight, hScreen, 0, 0, SRCCOPY);
+
+    IStream* stream;
+    CreateStreamOnHGlobal(NULL, TRUE, &stream);
+
+    EncoderParameters ep{};
+    ep.Count = 1;
+    ep.Parameter[0].Guid = EncoderQuality;
+    ep.Parameter[0].Type = EncoderParameterValueTypeLong;
+    ep.Parameter[0].NumberOfValues = 1;
+    ULONG quality = 50; // Set JPEG quality (adjust as needed, 50 is a balance)
+    ep.Parameter[0].Value = &quality;
+
+    Bitmap bmp(hBitmap, NULL);
+    bmp.Save(stream, &jpegClsid, &ep);
+
+    HGLOBAL hMem;
+    GetHGlobalFromStream(stream, &hMem);
+    SIZE_T size = GlobalSize(hMem);
+    void* data = GlobalLock(hMem);
+
+    out.assign((unsigned char*)data, (unsigned char*)data + size);
+
+    GlobalUnlock(hMem);
+    stream->Release();
+    DeleteObject(hBitmap);
+    DeleteDC(hDC);
+    ReleaseDC(NULL, hScreen);
+
+    return true;
+}
+
+// ================= WS/SOCKET.IO SEND FRAME =================
+
+void send_ws_text(const std::string& data) {
+    std::vector<unsigned char> frame;
+    frame.push_back(0x81); 
+
+    size_t len = data.size();
+    unsigned char mask[4];
+    for (int i = 0; i < 4; i++) mask[i] = rand() % 256;
+
+    if (len <= 125) {
+        frame.push_back(0x80 | len);
+    } else if (len <= 65535) {
+        frame.push_back(0x80 | 126);
+        frame.push_back((len >> 8) & 0xFF);
+        frame.push_back(len & 0xFF);
+    } else {
+        return;
+    }
+
+    frame.insert(frame.end(), mask, mask + 4);
+    
+    for (size_t i = 0; i < len; i++)
+        frame.push_back(data[i] ^ mask[i % 4]);
+
+    send(sockGlobal, (char*)frame.data(), frame.size(), 0);
+}
+
+// ================= SOCKET.IO SPECIFIC SENDERS =================
+
+void send_socketio_event(const std::string& eventName, const std::string& payloadJson) {
+    std::string socketio_frame = "42[\"" + eventName + "\"," + payloadJson + "]";
+    send_ws_text(socketio_frame);
+}
+
+void send_online_signal() {
+    
+    std::string payload = 
+        R"({"userId":")" + agentUserId + R"(", "name":"Agent Sharer"})";
+    send_socketio_event("user-online", payload);
+    std::cout << "✅ Sent user-online signal for User ID: " << agentUserId << "\n";
+}
+
+void send_screen_update(const std::string& base64_data) {
+    // Only send if we know who the viewer is
+    if (targetViewerId.empty()) return; 
+
+    std::string img_src = "data:image/jpeg;base64," + base64_data;
+    
+    std::string payload = 
+        R"({"senderId":")" + agentUserId + R"(", "targetId":")" + targetViewerId + R"(", "image":")" + img_src + R"("})";
+
+    send_socketio_event("screen-update", payload);
+}
+
+// ================= WEBSOCKET/SOCKET.IO CONNECT =================
+bool websocket_connect() {
+    const int PORT = 4000; 
+    
+    WSADATA wsa;
+    if (WSAStartup(MAKEWORD(2, 2), &wsa) != 0) {
+        std::cerr << "WSAStartup failed.\n";
+        return false;
+    }
+
+    sockGlobal = socket(AF_INET, SOCK_STREAM, 0);
+    if (sockGlobal == INVALID_SOCKET) {
+        std::cerr << "Socket creation failed.\n";
+        WSACleanup();
+        return false;
+    }
+
+
+    sockaddr_in addr{};
+    addr.sin_family = AF_INET;
+    addr.sin_port = htons(PORT);
+    addr.sin_addr.s_addr = inet_addr("127.0.0.1"); // Assuming localhost
+
+    if (connect(sockGlobal, (sockaddr*)&addr, sizeof(addr)) != 0) {
+        std::cout << "❌ TCP connect failed\n";
+        closesocket(sockGlobal);
+        WSACleanup();
+        return false;
+    }
+
+    std::string key = random_key();
+    
+    std::string req =
+        "GET /socket.io/?EIO=3&transport=websocket HTTP/1.1\r\n" 
+        "Host: localhost:" + std::to_string(PORT) + "\r\n"
+        "Upgrade: websocket\r\n"
+        "Connection: Upgrade\r\n"
+        "Sec-WebSocket-Key: " + key + "\r\n"
+        "Sec-WebSocket-Version: 13\r\n\r\n";
+
+    send(sockGlobal, req.c_str(), req.size(), 0);
+
+    char buf[2048];
+    int r = recv(sockGlobal, buf, sizeof(buf), 0);
+    if (r <= 0 || std::string(buf).find("101") == std::string::npos) {
+        std::cout << "❌ WS handshake failed\n";
+        closesocket(sockGlobal);
+        WSACleanup();
+        return false;
+    }
+    
+    std::cout << "✅ WS Handshake successful\n";
+    isConnected = true;
+    return true;
+}
+
+
+// ================= KEYBOARD CONTROL LOGIC (FIXED/COMPLETE) =================
+
+UCHAR map_js_code_to_vk(const std::string& jsCode) {
+    // Static map ensures it is initialized only once (efficient)
+    static const std::map<std::string, UCHAR> keyMap = {
+        // Letters
+        {"KeyA", 0x41}, {"KeyB", 0x42}, {"KeyC", 0x43}, {"KeyD", 0x44}, {"KeyE", 0x45}, {"KeyF", 0x46},
+        {"KeyG", 0x47}, {"KeyH", 0x48}, {"KeyI", 0x49}, {"KeyJ", 0x4A}, {"KeyK", 0x4B}, {"KeyL", 0x4C},
+        {"KeyM", 0x4D}, {"KeyN", 0x4E}, {"KeyO", 0x4F}, {"KeyP", 0x50}, {"KeyQ", 0x51}, {"KeyR", 0x52},
+        {"KeyS", 0x53}, {"KeyT", 0x54}, {"KeyU", 0x55}, {"KeyV", 0x56}, {"KeyW", 0x57}, {"KeyX", 0x58},
+        {"KeyY", 0x59}, {"KeyZ", 0x5A},
+
+        // Numbers (Non-Numpad)
+        {"Digit0", 0x30}, {"Digit1", 0x31}, {"Digit2", 0x32}, {"Digit3", 0x33}, {"Digit4", 0x34}, 
+        {"Digit5", 0x35}, {"Digit6", 0x36}, {"Digit7", 0x37}, {"Digit8", 0x38}, {"Digit9", 0x39},
+
+        // Function Keys
+        {"F1", VK_F1}, {"F2", VK_F2}, {"F3", VK_F3}, {"F4", VK_F4}, {"F5", VK_F5}, {"F6", VK_F6},
+        {"F7", VK_F7}, {"F8", VK_F8}, {"F9", VK_F9}, {"F10", VK_F10}, {"F11", VK_F11}, {"F12", VK_F12},
+
+        // Modifiers and Special Keys
+        {"Space", VK_SPACE}, 
+        {"Enter", VK_RETURN},
+        {"Backspace", VK_BACK},
+        {"Tab", VK_TAB},
+        {"Escape", VK_ESCAPE},
+        {"Delete", VK_DELETE},
+        {"Insert", VK_INSERT},
+
+        // Control Keys
+        {"ControlLeft", VK_LCONTROL}, {"ControlRight", VK_RCONTROL},
+        {"ShiftLeft", VK_LSHIFT}, {"ShiftRight", VK_RSHIFT},
+        {"AltLeft", VK_LMENU}, {"AltRight", VK_RMENU},
+
+        // Arrows
+        {"ArrowUp", VK_UP}, {"ArrowDown", VK_DOWN}, {"ArrowLeft", VK_LEFT}, {"ArrowRight", VK_RIGHT},
+
+        // Punctuation (Common US layout mappings)
+        {"Semicolon", VK_OEM_1}, 
+        {"Equal", VK_OEM_PLUS}, 
+        {"Comma", VK_OEM_COMMA}, 
+        {"Minus", VK_OEM_MINUS}, 
+        {"Period", VK_OEM_PERIOD}, 
+        {"Slash", VK_OEM_2}, 
+        {"Backquote", VK_OEM_3}, 
+        {"BracketLeft", VK_OEM_4}, 
+        {"Backslash", VK_OEM_5}, 
+        {"BracketRight", VK_OEM_6}, 
+        {"Quote", VK_OEM_7}, 
+        {"NumpadEnter", VK_RETURN} // Numpad Enter often sends the same code as main Enter
+    };
+
+    auto it = keyMap.find(jsCode);
+    if (it != keyMap.end()) {
+        return it->second;
+    }
+    return 0; // Default or unknown key
+}
+
+void apply_control_input(const std::string& json_payload) {
+    try {
+        json j = json::parse(json_payload);
+        auto event = j["event"];
+        std::string eventType = event["type"].get<std::string>();
+
+        // std::cout << "-> Received control: " << eventType << std::endl;
+
+        INPUT input = {0};
+
+        if (eventType == "mousemove" || eventType == "mousedown" || eventType == "mouseup") {
+            int x = event["x"].get<int>();
+            int y = event["y"].get<int>();
+            
+            // SCALING: Convert viewer's virtual 1920x1080 coordinates to Windows' 65535 absolute range
+            long scaledX = (long)((double)x * 65535.0 / (double)VIEWER_VIRTUAL_WIDTH);
+            long scaledY = (long)((double)y * 65535.0 / (double)VIEWER_VIRTUAL_HEIGHT);
+            
+            // 1. Move cursor first
+            input.type = INPUT_MOUSE;
+            input.mi.dwFlags = MOUSEEVENTF_MOVE | MOUSEEVENTF_ABSOLUTE;
+            input.mi.dx = scaledX;
+            input.mi.dy = scaledY;
+            SendInput(1, &input, sizeof(INPUT));
+
+            // 2. Handle click/release (only for mousedown/mouseup)
+            if (eventType == "mousedown" || eventType == "mouseup") {
+                int button = event["button"].get<int>(); // 0=Left, 2=Right
+                
+                input.mi.dwFlags = 0; 
+                if (button == 0) { // Left Click
+                    input.mi.dwFlags = (eventType == "mousedown" ? MOUSEEVENTF_LEFTDOWN : MOUSEEVENTF_LEFTUP);
+                } else if (button == 2) { // Right Click
+                    input.mi.dwFlags = (eventType == "mousedown" ? MOUSEEVENTF_RIGHTDOWN : MOUSEEVENTF_RIGHTUP);
+                }
+                SendInput(1, &input, sizeof(INPUT));
+            }
+        } else if (eventType == "keydown" || eventType == "keyup") {
+            std::string keyCode = event["code"].get<std::string>();
+            UCHAR vkCode = map_js_code_to_vk(keyCode); 
+            
+            if (vkCode != 0) {
+                input.type = INPUT_KEYBOARD;
+                input.ki.wVk = vkCode;
+                input.ki.dwFlags = (eventType == "keyup" ? KEYEVENTF_KEYUP : 0);
+                SendInput(1, &input, sizeof(INPUT));
+            } else {
+                std::cout << "Warning: Unmapped key code received: " << keyCode << std::endl;
+            }
+        }
+        
+    } catch (const json::exception& e) {
+        std::cerr << "JSON Parsing error in control input: " << e.what() << std::endl;
+    } catch (const std::exception& e) {
+        std::cerr << "Control application error: " << e.what() << std::endl;
+    }
+}
+
+// WS Receive Loop - Dynamic ID and Control Handling
+void websocket_receive_loop() {
+    char buffer[4096];
+    while (isConnected) {
+        // Reset buffer before receiving
+        ZeroMemory(buffer, sizeof(buffer));
+        int bytesReceived = recv(sockGlobal, buffer, sizeof(buffer), 0);
+        
+        if (bytesReceived <= 0) {
+            std::cout << "❌ Disconnected from server or error occurred\n";
+            isConnected = false;
+            break;
+        }
+
+        std::string received_data(buffer, bytesReceived);
+        
+        // ----------------------------------------------------
+        // PING/PONG: Handle Socket.IO PING (type '2') 
+        // ----------------------------------------------------
+        if (received_data.length() >= 1 && received_data[0] == '2') {
+            send(sockGlobal, "3", 1, 0); 
+            // std::cout << "🏓 Sent PONG response\n";
+            continue; 
+        }
+
+        // ----------------------------------------------------
+        // DYNAMIC TARGET ID: Handle 'start-sharing' event from server
+        // ----------------------------------------------------
+        size_t startSharingPos = received_data.find("42[\"start-sharing\"");
+        if (startSharingPos != std::string::npos) {
+            size_t startPayload = received_data.find('{', startSharingPos);
+            size_t endPayload = received_data.find_last_of('}', bytesReceived); 
+            
+            if (startPayload != std::string::npos && endPayload != std::string::npos) {
+                try {
+                    std::string json_payload = received_data.substr(startPayload, endPayload - startPayload + 1);
+                    json j = json::parse(json_payload);
+                    targetViewerId = j["targetId"].get<std::string>();
+                    std::cout << "🎯 Target Viewer set: " << targetViewerId << " (Screen sending will start)\n";
+                } catch (const json::exception& e) {
+                    std::cerr << "JSON Parsing error for start-sharing: " << e.what() << std::endl;
+                }
+            }
+        }
+        
+        // ----------------------------------------------------
+        // CONTROL INPUT: Handle 'receive-control-input' event
+        // ----------------------------------------------------
+        size_t eventPos = received_data.find("42[\"receive-control-input\"");
+        if (eventPos != std::string::npos) {
+            size_t startPayload = received_data.find('{', eventPos);
+            size_t endPayload = received_data.find_last_of('}', bytesReceived); 
+            
+            if (startPayload != std::string::npos && endPayload != std::string::npos && startPayload < endPayload) {
+                std::string json_payload = received_data.substr(startPayload, endPayload - startPayload + 1);
+                apply_control_input(json_payload);
+            } else {
+                std::cout << "Warning: Could not extract full JSON payload for control input.\n";
+            }
+        }
+    }
+    closesocket(sockGlobal);
+    WSACleanup();
+}
+
+// ================= MAIN THREADS =================
+void screen_capture_and_send_loop() {
+    // Wait a moment after connection to ensure handshake is complete
+    std::this_thread::sleep_for(std::chrono::milliseconds(500)); 
+    
+    send_online_signal(); // Send the dynamic ID to register the Sharer
+
+    while (isConnected) {
+        // Only send screen updates if the Target Viewer ID is set
+        if (!targetViewerId.empty()) { 
+            std::vector<unsigned char> jpg;
+            capture_screen(jpg);
+            std::string base64_str = base64_encode(jpg.data(), jpg.size());
+            send_screen_update(base64_str);
+        }
+        // Adjust this for desired FPS (80ms is approx 12.5 FPS)
+        std::this_thread::sleep_for(std::chrono::milliseconds(80)); 
+    }
+}
+
+
+// ================= MAIN FUNCTION =================
+
+int main(int argc, char* argv[]) {
+    // 1. Dynamic ID extraction from Command Line Argument (URL)
+    if (argc > 1) {
+        agentUserId = get_user_id_from_url(argv[1]);
+    }
+
+    if (agentUserId.empty()) {
+        std::cerr << "❌ Error: Could not determine AGENT_USER_ID from command line.\n";
+        std::cerr << "Please ensure agent.exe is run via the browser's download link (with ?user_id=...). Exiting.\n";
+        return 1;
+    }
+    
+    std::cout << "Starting C++ Agent for User: " << agentUserId << "...\n";
+    
+    // Initialize GDI+
+    GdiplusStartupInput gpsi;
+    ULONG_PTR token;
+    GdiplusStartup(&token, &gpsi, NULL);
+    init_jpeg();
+
+    if (!websocket_connect()) {
+        GdiplusShutdown(token);
+        return 0;
+    }
+
+    // Start threads for receiving commands and sending screen
+    std::thread receive_thread(websocket_receive_loop);
+    std::thread send_thread(screen_capture_and_send_loop);
+    
+    // Wait for threads to finish
+    receive_thread.join();
+    send_thread.join();
+    
+    GdiplusShutdown(token);
+    return 0;
+}

@@ -1,48 +1,75 @@
-<header class="bg-red-500 text-white p-4 shadow-md">
-  <nav class="container mx-auto flex justify-between items-center">
-    <ul class="flex space-x-4">
-      <li>
-        <a
-          href="/"
-          class="<%= currentPage === 'index' ? 'bg-red-400' : 'hover:bg-red-400' %> py-2 px-4 rounded transition duration-300"
-          >Signup</a
-        >
-      </li>
-      <li>
-        <a
-          href="/host/login"
-          class="<%= currentPage === 'Home' ? 'bg-red-400' : 'hover:bg-red-400' %> py-2 px-4 rounded transition duration-300"
-          >Login</a
-        >
-      </li>
-      <li>
-        <a
-          href="/favourites"
-          class="<%= currentPage === 'favourites' ? 'bg-red-400' : 'hover:bg-red-400' %> py-2 px-4 rounded transition duration-300"
-          >Favourites</a
-        >
-      </li>
-      <li>
-        <a
-          href="/bookings"
-          class="<%= currentPage === 'bookings' ? 'bg-red-400' : 'hover:bg-red-400' %> py-2 px-4 rounded transition duration-300"
-          >Bookings</a
-        >
-      </li>
-      <li>
-        <a
-          href="/host/admin-Dashboard-list"
-          class="<%= currentPage === 'host-homes' ? 'bg-red-400' : 'hover:bg-red-400' %> py-2 px-4 rounded transition duration-300"
-          >Users List</a
-        >
-      </li>
-      <li>
-        <a
-          href="/host/add-home"
-          class="<%= currentPage === 'addHome' ? 'bg-red-400' : 'hover:bg-red-400' %> py-2 px-4 rounded transition duration-300"
-          >edit User</a
-        >
-      </li>
+<% const current = typeof currentPage !== "undefined" ? currentPage : ""; %>
+
+<header class="bg-gradient-to-r from-slate-800 via-slate-700 to-slate-800 text-white shadow-lg border-b-2 border-blue-500">
+  <nav class="relative z-[999] container mx-auto flex justify-between items-center px-4 py-3">
+
+    <div class="flex items-center">
+      <a href="/" class="text-2xl font-bold bg-gradient-to-r from-blue-400 to-cyan-400 bg-clip-text text-transparent">
+        ScreenShare
+      </a>
+    </div>
+
+    <ul class="flex items-center gap-2 pr-72">
+      <% if (isLoggedIn) { %>
+        <li>
+          <a href="/dashboard"
+            class="<%= current === 'dashboard'
+              ? 'bg-gradient-to-r from-purple-500 to-purple-600 shadow-lg'
+              : 'text-gray-200 hover:text-white hover:bg-white/10' %>
+            text-white font-semibold py-2 px-4 rounded-lg">
+            👥 Dashboard
+          </a>
+        </li>
+
+        <li>
+          <a href="/favourites"
+            class="<%= current === 'favourites'
+              ? 'bg-gradient-to-r from-blue-500 to-blue-600 shadow-lg'
+              : 'text-gray-200 hover:text-white hover:bg-white/10' %>
+            text-white font-semibold py-2 px-4 rounded-lg">
+            ♥ Favourites
+          </a>
+        </li>
+
+        <li>
+          <a href="/bookings"
+            class="<%= current === 'bookings'
+              ? 'bg-gradient-to-r from-green-500 to-green-600 shadow-lg'
+              : 'text-gray-200 hover:text-white hover:bg-white/10' %>
+            text-white font-semibold py-2 px-4 rounded-lg">
+            📅 Bookings
+          </a>
+        </li>
+
+        <li>
+          <form action="/logout" method="POST">
+            <button type="submit"
+              class="bg-gradient-to-r from-red-500 to-red-600 text-white font-semibold py-2 px-4 rounded-lg">
+              🚪 Logout
+            </button>
+          </form>
+        </li>
+      <% } else { %>
+        <li>
+          <a href="/signup"
+            class="<%= current === 'signup'
+              ? 'bg-gradient-to-r from-amber-500 to-amber-600 shadow-lg'
+              : 'text-gray-200 hover:text-white hover:bg-white/10' %>
+            text-white font-semibold py-2 px-4 rounded-lg">
+            ✓ Signup
+          </a>
+        </li>
+
+        <li>
+          <a href="/login"
+            class="<%= current === 'login'
+              ? 'bg-gradient-to-r from-cyan-500 to-cyan-600 shadow-lg'
+              : 'text-gray-200 hover:text-white hover:bg-white/10' %>
+            text-white font-semibold py-2 px-4 rounded-lg">
+            🔐 Login
+          </a>
+        </li>
+      <% } %>
     </ul>
   </nav>
 </header>

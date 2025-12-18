@@ -1,0 +1,46 @@
+<%- include('../partials/head') %>
+</head>
+
+<body class="bg-gray-100 min-h-screen text-gray-800">
+    <%- include('../partials/nav') %>
+
+    <span id="current-user-id" data-user-id="<%= viewerId %>" class="hidden"></span>
+
+    <main class="p-4 max-w-6xl mx-auto">
+        <h1 class="text-3xl font-extrabold text-blue-600 mt-4">📺 Viewing Live Screen</h1>
+        <p class="text-lg mt-2">Screen of User ID: <span class="font-mono bg-gray-200 px-2 py-1 rounded text-sm"><%= sharerId %>
+</span></p>
+        
+        <hr class="my-6">
+
+        <div id="remote-stream-container" class="mt-4 bg-black border border-gray-700 rounded-lg shadow-xl overflow-hidden" style="display:block;">
+            <video id="remote-video" 
+                   autoplay 
+                   playsinline 
+                   class="w-full h-full" 
+                   style="max-height: 80vh;">
+            </video>
+            <p id="connection-status" class="text-white p-3 bg-gray-800 text-center">Connecting to shared stream...</p>
+        </div>
+        
+        <button id="stop-viewing-btn" class="mt-8 bg-gray-500 hover:bg-gray-600 text-white font-bold py-3 px-6 rounded-lg shadow-md transition duration-200">
+            Stop Viewing
+        </button>
+        
+    </main>
+<script>
+  window.CURRENT_USER_NAME = "Viewer";
+</script>
+
+    <script src="/socket.io/socket.io.js"></script>
+    <script src="/js/webrtc.js"></script> 
+    <script src="/js/viewer.js"></script>
+    
+    <script>
+        document.getElementById('stop-viewing-btn').onclick = () => {
+             // In production, you might want to emit an event to the Sharer first
+             window.location.href = '/dashboard';
+        };
+    </script>
+</body>
+</html>

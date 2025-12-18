@@ -1,0 +1,78 @@
+<%- include('partials/head') %>
+</head>
+
+<body class="bg-gray-100 min-h-screen">
+
+<%- include('partials/nav') %>
+
+<!-- Logged-in User -->
+<div class="bg-red-100 text-red-700 p-3 border-l-4 border-red-500 mb-5">
+  Logged In User ID: <%= user._id %>
+</div>
+
+<!-- Hidden element for JS -->
+<span id="current-user-id" data-user-id="<%= user._id %>" class="hidden"></span>
+
+<div class="p-5 max-w-4xl mx-auto">
+
+    <!-- Incoming Request UI -->
+    <div id="incoming-request-container"
+      class="hidden bg-yellow-100 border-l-4 border-yellow-500 text-yellow-700 p-4 mb-5">
+    </div>
+
+    <!-- Remote Screen (Viewer) -->
+    <div id="remote-stream-container" class="hidden mb-5">
+        <h3 class="text-xl font-semibold mb-3">Viewing Shared Screen</h3>
+        <video id="remote-video" autoplay playsinline
+          class="w-full h-auto border border-gray-400 rounded-lg"></video>
+    </div>
+
+    <!-- Your Screen (Sharer) -->
+    <div id="local-stream-container" class="hidden mb-5">
+        <h3 class="text-xl font-semibold mb-3">Your Screen (Being Shared)</h3>
+        <video id="local-video" autoplay muted playsinline
+          class="w-1/4 h-auto border border-gray-400 rounded-lg"></video>
+
+        <button id="stop-share-btn" class="mt-2 bg-red-500 text-white px-4 py-2 rounded">
+          Stop Sharing
+        </button>
+    </div>
+</div>
+
+<!-- RIGHT SIDEBAR -->
+<div class="fixed top-0 right-0 w-64 h-full bg-[#1E1E2E] text-white shadow-xl z-50 p-5">
+
+    <h2 class="text-xl font-bold flex items-center gap-2 mb-4">
+        <span class="h-3 w-3 bg-green-400 rounded-full"></span>
+        Online Users
+    </h2>
+
+    <div id="active-users-list"
+      class="space-y-3 max-h-[calc(100%-80px)] overflow-y-auto">
+
+        <!-- Show actual MongoDB Users -->
+        <% if (users.length > 0) { %>
+          <% users.forEach(u => { %>
+            <div class="bg-[#2A2A3A] p-3 rounded-lg flex justify-between items-center">
+                <span><%= u.firstName %> <%= u.lastName %></span>
+                <button class="bg-blue-500 px-2 py-1 rounded text-sm request-btn"
+                        data-target-id="<%= u._id %>">
+                    Request
+                </button>
+            </div>
+          <% }) %>
+        <% } else { %>
+            <div class="text-gray-400 bg-[#2A2A3A] p-3 rounded-lg text-center">
+                No users online
+            </div>
+        <% } %>
+
+    </div>
+</div>
+
+<script src="/socket.io/socket.io.js"></script>
+<script src="/js/dashboard.js"></script>
+<script src="/js/webrtc.js"></script>
+
+</body>
+</html>

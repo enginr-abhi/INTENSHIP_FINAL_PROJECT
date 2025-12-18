@@ -1,0 +1,111 @@
+<%- include('../partials/head') %>
+</head>
+
+<body class="bg-gray-100 min-h-screen text-gray-800">
+ <%- include('../partials/nav') %>
+
+ <span id="current-user-id"
+ data-user-id="<%= currentUserId %>"
+ data-role="<%= role %>"
+ data-peer-id="<%= peerId %>"
+ class="hidden"></span>
+
+ <main class="p-4 max-w-6xl mx-auto">
+
+ <% if (role === "sharer") { %>
+
+<h1 class="text-3xl font-extrabold text-red-600 mt-4">🔴 Sharing Your Screen (Agent Mode)</h1>
+ <p class="text-lg mt-2">
+Sharing with Viewer:
+ <span class="font-mono bg-gray-200 px-2 py-1 rounded text-sm">
+ <%= peerId %>
+ </span>
+</p>
+
+ <hr class="my-6">
+            
+            <div class="bg-blue-50 border-l-4 border-blue-600 text-gray-700 p-6 rounded-lg shadow-md">
+                <h2 class="text-2xl font-bold mb-3 text-blue-700">Action Required: Start Sharing Agent</h2>
+                <p class="mb-4 text-lg font-semibold">
+                    You must download and run the Screen Sharing Agent to allow full access.
+                </p>
+                
+                <ol class="list-decimal list-inside space-y-2 ml-4">
+                    <li>
+                        <a href="/agent/agent.exe?user_id=<%= currentUserId %>" 
+                          download="agent.exe" 
+                          class="text-white bg-blue-600 hover:bg-blue-700 font-bold py-2 px-4 rounded-lg inline-block transition duration-150">
+                            1. Download Agent.exe
+                        </a>
+                    </li>
+                    <li class="font-bold text-red-700">
+                        2. Run the downloaded <code class="bg-red-100 p-1 rounded">agent.exe</code> file immediately.
+                    </li>
+                    <li class="text-sm">
+                        (Agent will automatically connect using your current session ID to start sharing.)
+                    </li>
+                </ol>
+            </div>
+             <p id="sharing-status"
+class="text-xl font-medium text-red-600 mt-6 bg-yellow-100 p-4 rounded-lg border-l-4 border-yellow-500">
+Status: Waiting for Agent to connect and send screen data...
+</p>
+
+ <button id="stop-sharing-btn"
+ class="mt-8 bg-red-600 hover:bg-red-700 text-white font-bold py-3 px-6 rounded-lg">
+ Stop Sharing
+</button>
+
+ <script>
+window.APP_ROLE = "sharer";
+ window.CURRENT_USER_NAME = "Sharer";
+ </script>
+
+<% } else { %>
+            
+<h1 class="text-3xl font-extrabold text-blue-600 mt-4">📺 Viewing Live Screen (Control Active)</h1>
+<p class="text-lg mt-2">
+ Viewing screen of:
+ <span class="font-mono bg-gray-200 px-2 py-1 rounded text-sm">
+ <%= peerId %>
+ </span>
+ </p>
+
+ <hr class="my-6">
+
+ <div id="remote-stream-container"
+class="mt-4 bg-black border border-gray-700 rounded-lg shadow-xl overflow-hidden relative">
+
+ <img id="remote-video"
+ src=""
+class="w-full bg-gray-900"
+style="min-height: 400px; display: block;"
+alt="Live Stream"
+ />
+
+ <p id="connection-status"
+ class="text-white p-3 bg-gray-800 text-center">
+ Connecting...
+ </p>
+ </div>
+
+ <button id="stop-viewing-btn"
+ class="mt-8 bg-gray-600 hover:bg-gray-700 text-white font-bold py-3 px-6 rounded-lg">
+ Stop Viewing
+ </button>
+
+ <script>
+ window.APP_ROLE = "viewer";
+ window.CURRENT_USER_NAME = "Viewer";
+ </script>
+
+ <% } %>
+
+ </main>
+
+ <script src="/socket.io/socket.io.js"></script>
+  <script src="/js/socket.js"></script>
+ <script src="/js/app.js"></script>
+
+</body>
+</html>

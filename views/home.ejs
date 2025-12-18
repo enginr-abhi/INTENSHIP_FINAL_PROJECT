@@ -1,0 +1,96 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title><%= pageTitle %></title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <style>
+  .mt-28 {
+    margin-top: 8rem; /* 128px */
+  }
+</style>
+
+</head>
+
+<body class="bg-gray-50 text-gray-800">
+
+  <!-- NAVBAR -->
+  <header class="bg-white shadow-sm border-b">
+    <nav class="container mx-auto flex justify-between items-center py-4 px-4">
+      <h1 class="text-2xl font-bold text-red-600 tracking-wide">RemoteControl</h1>
+
+      <ul class="flex items-center space-x-4">
+        <li>
+          <a href="/signup"
+             class="py-2 px-5 rounded-lg bg-red-500 text-white font-medium hover:bg-red-600 transition">
+            Signup
+          </a>
+        </li>
+        <li>
+          <a href="/login"
+             class="py-2 px-5 rounded-lg bg-gray-800 text-white font-medium hover:bg-gray-900 transition">
+            Login
+          </a>
+        </li>
+      </ul>
+    </nav>
+  </header>
+
+  <!-- HERO SECTION -->
+  <section class="container mx-auto text-center mt-20 px-4">
+    <h2 class="text-5xl font-extrabold text-gray-900 leading-snug">
+      Fast & Secure Remote Control
+    </h2>
+
+    <p class="text-lg text-gray-600 mt-4 max-w-2xl mx-auto">
+      Control devices remotely, share your screen, and assist users securely with a professional remote desktop solution.
+    </p>
+
+    <div class="mt-10 flex justify-center space-x-6">
+      <a href="/signup"
+         class="bg-red-500 text-white font-semibold py-3 px-10 rounded-lg shadow hover:bg-red-600 transition text-lg">
+        Get Started
+      </a>
+      <a href="/login"
+         class="bg-gray-800 text-white font-semibold py-3 px-10 rounded-lg shadow hover:bg-black transition text-lg">
+        Login
+      </a>
+    </div>
+  </section>
+
+  <!-- HOW IT WORKS -->
+  <section class="container mx-auto mt-28 px-4">
+    <h3 class="text-3xl md:text-4xl font-extrabold text-center text-gray-900 mb-14">
+      How It Works
+    </h3>
+
+    <div class="grid grid-cols-1 md:grid-cols-3 gap-10">
+
+      <div class="bg-white p-8 rounded-xl shadow hover:shadow-lg transition text-center border border-gray-200">
+        <h4 class="text-xl font-semibold mb-3 text-gray-900">1. Create Account</h4>
+        <p class="text-gray-600">Signup and login to access the remote control dashboard.</p>
+      </div>
+
+      <div class="bg-white p-8 rounded-xl shadow hover:shadow-lg transition text-center border border-gray-200">
+        <h4 class="text-xl font-semibold mb-3 text-gray-900">2. Send Request</h4>
+        <p class="text-gray-600">User1 sends a remote access request to User2.</p>
+      </div>
+
+      <div class="bg-white p-8 rounded-xl shadow hover:shadow-lg transition text-center border border-gray-200">
+        <h4 class="text-xl font-semibold mb-3 text-gray-900">3. Start Remote Session</h4>
+        <p class="text-gray-600">User2 runs the agent & User1 gets full screen access.</p>
+      </div>
+
+    </div>
+  </section>
+
+  <!-- FOOTER -->
+  <footer class="bg-gray-900 text-white text-center py-6 mt-28">
+    <p class="text-gray-300">
+      © <%= new Date().getFullYear() %> RemoteControl — Secure Remote Desktop Solution
+    </p>
+  </footer
+
+</body>
+</html>

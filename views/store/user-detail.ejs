@@ -6,10 +6,15 @@
       <h2 class="text-3xl text-red-500 font-bold text-center mb-6">
         Welcome to User details page:
       </h2>
-        <div class="bg-[#2A2A3A] p-3 rounded-lg border border-gray-700 hover:border-blue-400 transition">
+        <div class="p-3 rounded-lg border border-gray-700 hover:border-blue-400 transition">
           <div class="text-sm font-bold"><%= user.username %></div>
-
-          <div class="text-[11px] text-gray-400 break-words"><%= user.email %></div>
+          <div class="break-words"><%= user.email %></div>
+            <div><a href="/edit-Login/<%= user.id %>?editing=true" 
+   class="inline-block mt-4 px-4 py-2 bg-blue-500 text-white rounded hover:bg-blue-600">
+    Edit Details
+</a>
+</div>
+            <div class="mt-5"><%- include('../partials/favourite') %></div>
         </div>
     </main>
   </body>
