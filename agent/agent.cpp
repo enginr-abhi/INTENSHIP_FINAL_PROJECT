@@ -5,7 +5,8 @@
 #include <vector>
 #include <thread>
 #include <string>
-#include <mutex> // 👈 Flow protection ke liye add kiya
+#include <mutex> 
+#include <algorithm>
 #include "json.hpp" 
 
 #pragma comment(lib, "Ws2_32.lib")
@@ -22,9 +23,9 @@ bool isConnected = false;
 std::string targetViewerId = ""; 
 std::string agentUserId = "";    
 CLSID jpegClsid;
-std::mutex sendMutex; // 🛡️ Ye socket ko jam hone se bachayega
+std::mutex sendMutex; 
 
-// ID extraction logic (Wahi rakha hai jo tune diya tha)
+// --- Helper: ID from Filename ---
 std::string get_id_from_filename() {
     char path[MAX_PATH];
     GetModuleFileNameA(NULL, path, MAX_PATH);
@@ -42,6 +43,7 @@ std::string get_id_from_filename() {
     return "";
 }
 
+// --- Helper: ID from URL ---
 std::string get_user_id_from_url(const std::string &url) {
     size_t start_pos = url.find("user_id=");
     if (start_pos == std::string::npos) return "";
@@ -50,9 +52,9 @@ std::string get_user_id_from_url(const std::string &url) {
     return url.substr(start_pos, (end_pos == std::string::npos) ? url.length() - start_pos : end_pos - start_pos);
 }
 
-// ✅ FIXED: Mutex added to stop collision
+// --- WebSocket Framing ---
 void send_ws_text(const std::string &data) {
-    std::lock_guard<std::mutex> lock(sendMutex); // 🔒 Socket ko protect kar diya
+    std::lock_guard<std::mutex> lock(sendMutex); 
     std::vector<unsigned char> frame;
     frame.push_back(0x81);
     size_t len = data.size();
@@ -75,39 +77,54 @@ void send_socketio_event(const std::string &event, json payload) {
     send_ws_text(s);
 }
 
-// ✅ FIXED: Better click handling for folders
+// --- 🚀 THE FINAL CONTROL FIX ---
 void handle_control(json event) {
     try {
         std::string type = event["type"];
-        int sw = GetSystemMetrics(SM_CXSCREEN);
-        int sh = GetSystemMetrics(SM_CYSCREEN);
-        if (type == "mousemove" || type == "mousedown" || type == "mouseup" || type == "click") {
-            double ew = event.value("w", (double)sw);
-            double eh = event.value("h", (double)sh);
-            int x = (int)(event["x"].get<double>() * sw / (ew > 0 ? ew : 1));
-            int y = (int)(event["y"].get<double>() * sh / (eh > 0 ? eh : 1));
-            
-            // SetCursorPos works best for direct movement
-            SetCursorPos(x, y);
+        
+        if (event.contains("x") && event.contains("y")) {
+            double xRatio = event["x"].get<double>();
+            double yRatio = event["y"].get<double>();
 
-            if (type == "mousedown" || type == "click") {
-                mouse_event(MOUSEEVENTF_LEFTDOWN, 0, 0, 0, 0);
-                if(type == "click") {
-                    std::this_thread::sleep_for(std::chrono::milliseconds(50));
-                    mouse_event(MOUSEEVENTF_LEFTUP, 0, 0, 0, 0);
-                }
+            // Windows Absolute Coordinate System (0 to 65535)
+            // Isse DPI/Scaling ka issue solve ho jata hai
+            int absX = (int)(xRatio * 65535.0f);
+            int absY = (int)(yRatio * 65535.0f);
+
+            std::cout << "🖱️ [ACTION] " << type << " at " << xRatio << "," << yRatio << std::endl;
+
+            // Move cursor to absolute position
+            mouse_event(MOUSEEVENTF_ABSOLUTE | MOUSEEVENTF_MOVE, absX, absY, 0, 0);
+
+            if (type == "mousedown") {
+                mouse_event(MOUSEEVENTF_ABSOLUTE | MOUSEEVENTF_LEFTDOWN, absX, absY, 0, 0);
             }
-            else if (type == "mouseup") mouse_event(MOUSEEVENTF_LEFTUP, 0, 0, 0, 0);
-        } else if (type == "keydown") {
+            else if (type == "mouseup") {
+                mouse_event(MOUSEEVENTF_ABSOLUTE | MOUSEEVENTF_LEFTUP, absX, absY, 0, 0);
+            }
+            else if (type == "contextmenu") { 
+                mouse_event(MOUSEEVENTF_ABSOLUTE | MOUSEEVENTF_RIGHTDOWN | MOUSEEVENTF_RIGHTUP, absX, absY, 0, 0);
+            }
+            else if (type == "dblclick") {
+                mouse_event(MOUSEEVENTF_ABSOLUTE | MOUSEEVENTF_LEFTDOWN | MOUSEEVENTF_LEFTUP, absX, absY, 0, 0);
+                std::this_thread::sleep_for(std::chrono::milliseconds(50));
+                mouse_event(MOUSEEVENTF_ABSOLUTE | MOUSEEVENTF_LEFTDOWN | MOUSEEVENTF_LEFTUP, absX, absY, 0, 0);
+            }
+        } 
+        else if (type == "keydown") {
             int vk = event.value("keyCode", 0);
             if (vk > 0) keybd_event((BYTE)vk, 0, 0, 0);
-        } else if (type == "keyup") {
+        } 
+        else if (type == "keyup") {
             int vk = event.value("keyCode", 0);
             if (vk > 0) keybd_event((BYTE)vk, 0, KEYEVENTF_KEYUP, 0);
         }
-    } catch (...) {}
+    } catch (...) {
+        std::cout << "⚠️ Error processing control input" << std::endl;
+    }
 }
 
+// --- GDI+ Setup & Image Encoding ---
 void init_jpeg() {
     UINT num, size; GetImageEncodersSize(&num, &size);
     if (size == 0) return;
@@ -133,6 +150,7 @@ std::string base64_encode(const unsigned char *data, int len) {
     return out;
 }
 
+// --- WebSocket Receive Loop ---
 void websocket_receive_loop() {
     char buffer[65536]; 
     while (isConnected) {
@@ -140,16 +158,20 @@ void websocket_receive_loop() {
         if (r <= 0) { isConnected = false; break; }
         buffer[r] = '\0';
         std::string raw(buffer);
+
         if (raw[0] == '2') { send_ws_text("3"); continue; }
         
-        // Handle Socket.io events correctly
         size_t pos = raw.find("[");
         if (pos != std::string::npos) {
             try {
+                // FIXED: Using :: instead of . for parse
                 json j = json::parse(raw.substr(pos));
                 if (j.is_array() && j.size() >= 2) {
                     std::string ev = j[0].get<std::string>();
-                    if (ev == "start-sharing") targetViewerId = j[1]["targetId"].get<std::string>();
+                    if (ev == "start-sharing") {
+                        targetViewerId = j[1]["targetId"].get<std::string>();
+                        std::cout << "📢 Connected to Viewer: " << targetViewerId << std::endl;
+                    }
                     if (ev == "receive-control-input") {
                         if (j[1].contains("event")) handle_control(j[1]["event"]);
                     }
@@ -159,9 +181,12 @@ void websocket_receive_loop() {
     }
 }
 
+// --- Main Function ---
 int main(int argc, char *argv[]) {
-    // Wahi main logic jo aapne diya tha
-    std::cout << "--- Starting ScreenShare Agent (v2.0 Fixed) ---" << std::endl;
+    // 🔥 Important for modern high-res screens
+    SetProcessDPIAware(); 
+
+    std::cout << "--- Starting ScreenShare Agent (v4.0 Final) ---" << std::endl;
     if (argc > 1) agentUserId = get_user_id_from_url(argv[1]);
     if (agentUserId.empty()) agentUserId = get_id_from_filename();
     
@@ -220,7 +245,7 @@ int main(int argc, char *argv[]) {
             }
             closesocket(sockGlobal);
         } else {
-            std::cout << "❌ Retrying..." << std::endl;
+            std::cout << "❌ Retrying connection in 5s..." << std::endl;
             Sleep(5000);
         }
     }

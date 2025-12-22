@@ -1,152 +1,160 @@
-// public/js/app.js — FINAL (SCREEN VIEW + FULL CONTROL)
-// ✅ Mouse + Keyboard control
-// ✅ Focus fixed
-// ✅ preventDefault fixed
-// ✅ Demo ready
-
+// public/js/app.js — FINAL DEBUG & FOCUS FIXED VERSION (PERCENTAGE SCALING)
 const socket = window.socket;
 
-// Agent (sharer) real screen resolution
+// 🔥 Note: Agent side logic handles actual resolution now via percentages
 const SHARER_WIDTH = 1920;
 const SHARER_HEIGHT = 1080;
 
 function handleDisconnect() {
-    alert("Session ended. Redirecting to dashboard.");
-    window.location.href = "/dashboard";
+  console.log("⚠️ Session closing...");
+  alert("Session ended. Redirecting to dashboard.");
+  window.location.href = "/dashboard";
 }
 
 /* ======================================
    SEND CONTROL EVENT TO SERVER
 ====================================== */
 function sendControlEvent(e, sharerId, viewerId) {
-    if (!window.location.pathname.startsWith("/view/")) return;
-    if (!sharerId || !viewerId) return;
+  if (!window.location.pathname.startsWith("/view/")) return;
+  if (!sharerId || !viewerId) return;
 
-    const remoteVideo = document.getElementById("remote-video");
-    if (!remoteVideo) return;
+  const remoteVideo = document.getElementById("remote-video");
+  if (!remoteVideo) return;
 
-    // 🔥 VERY IMPORTANT
-    e.preventDefault();
+  // 🔥 Stop browser from opening context menus or scrolling
+  e.preventDefault();
 
-    const rect = remoteVideo.getBoundingClientRect();
-    let eventPayload = null;
+  const rect = remoteVideo.getBoundingClientRect();
+  let eventPayload = null;
 
-    /* ============ MOUSE EVENTS ============ */
-    if (e.type.startsWith("mouse")) {
-        if (!rect.width || !rect.height) return;
+  /* ============ MOUSE EVENTS ============ */
+  if (e.type.startsWith("mouse") || e.type === "dblclick") {
+    if (!rect.width || !rect.height) return;
 
-        const x = Math.round((e.clientX - rect.left) * (SHARER_WIDTH / rect.width));
-        const y = Math.round((e.clientY - rect.top) * (SHARER_HEIGHT / rect.height));
+    // 🔥 THE MASTER FIX: Percentage calculation
+    // Isse viewer ki window size (half/full) ka koi asar nahi hoga
+    const xPercent = (e.clientX - rect.left) / rect.width;
+    const yPercent = (e.clientY - rect.top) / rect.height;
 
-        eventPayload = {
-            type: e.type,
-            x,
-            y,
-            w: SHARER_WIDTH,
-            h: SHARER_HEIGHT
-        };
+    eventPayload = {
+      type: e.type,
+      x: xPercent, // Bhejna hai ratio (0 to 1)
+      y: yPercent, // Bhejna hai ratio (0 to 1)
+      button: e.button, 
+      w: rect.width, // Viewer's current video width
+      h: rect.height, // Viewer's current video height
+    };
+
+    // 🧪 VS Code Terminal Log Trigger
+    if (e.type === "mousedown" || e.type === "dblclick") {
+      console.log(`🎯 ${e.type.toUpperCase()} SENT! X-Ratio:${xPercent.toFixed(3)} Y-Ratio:${yPercent.toFixed(3)}`);
     }
-
+  } else if (e.type === "keydown" || e.type === "keyup") {
     /* ============ KEYBOARD EVENTS ============ */
-    else if (e.type === "keydown" || e.type === "keyup") {
-        eventPayload = {
-            type: e.type,
-            keyCode: e.keyCode || e.which,
-            key: e.key
-        };
-    }
+    eventPayload = {
+      type: e.type,
+      keyCode: e.keyCode || e.which,
+      key: e.key,
+    };
+    console.log(`⌨️ KEY EVENT: ${e.type} - Key: ${e.key}`);
+  }
 
-    if (!eventPayload) return;
+  if (!eventPayload) return;
 
-    socket.emit("control-input", {
-        targetId: sharerId,   // USER2 (agent)
-        senderId: viewerId,   // USER1 (viewer)
-        event: eventPayload
-    });
+  // 🔥 Emit to server
+  socket.emit("control-input", {
+    targetId: sharerId,
+    senderId: viewerId,
+    event: eventPayload,
+  });
 
-    // 🧪 Debug (demo ke baad hata sakta hai)
-    console.log("🎮 CONTROL SENT:", eventPayload.type);
+  console.log("🎮 CONTROL SENT TO SERVER:", eventPayload.type);
 }
 
 /* ======================================
    INIT AFTER DOM READY
 ====================================== */
 document.addEventListener("DOMContentLoaded", () => {
-    setTimeout(() => {
+  console.log("✅ DOM Loaded. Initializing Control System...");
 
-        const userElement = document.getElementById("current-user-id");
-        const viewerId = userElement?.dataset.userId;
-        const path = window.location.pathname;
+  setTimeout(() => {
+    const userElement = document.getElementById("current-user-id");
+    const viewerId = userElement?.dataset.userId;
+    const path = window.location.pathname;
 
-        if (!viewerId) {
-            console.error("❌ Viewer ID missing");
-            return;
+    if (!viewerId) {
+      console.error("❌ Viewer ID missing");
+      return;
+    }
+
+    socket.emit("user-online", {
+      userId: viewerId,
+      name: window.CURRENT_USER_NAME || "User",
+    });
+
+    /* ============ VIEWER MODE ============ */
+    if (path.startsWith("/view/")) {
+      const sharerId = path.split("/").pop();
+      const remoteVideo = document.getElementById("remote-video");
+      const status = document.getElementById("connection-status");
+
+      if (status) {
+        status.innerText = "Status: Connecting to Agent...";
+        status.style.color = "orange";
+      }
+
+      /* ===== SCREEN RECEIVE ===== */
+      socket.on("receive-screen-data", (data) => {
+        if (!data?.image || !remoteVideo) return;
+
+        const imgSrc = data.image.startsWith("data:image")
+          ? data.image
+          : `data:image/jpeg;base64,${data.image}`;
+
+        remoteVideo.src = imgSrc;
+
+        if (status && status.innerText !== "Status: LIVE") {
+          status.innerText = "Status: LIVE";
+          status.style.color = "green";
         }
+      });
 
-        // Viewer online
-        socket.emit("user-online", {
-            userId: viewerId,
-            name: window.CURRENT_USER_NAME || "User"
-        });
+      const boundControl = (e) => sendControlEvent(e, sharerId, viewerId);
 
-        /* ============ VIEWER MODE ============ */
-        if (path.startsWith("/view/")) {
+      /* ===== FOCUS & CLICK FIX ===== */
+      remoteVideo.setAttribute("tabindex", "0");
 
-            const sharerId = path.split("/").pop();
-            const remoteVideo = document.getElementById("remote-video");
-            const status = document.getElementById("connection-status");
+      remoteVideo.addEventListener("mousedown", (e) => {
+        remoteVideo.focus(); 
+        console.log("🖱️ MOUSE DOWN DETECTED!");
+        boundControl(e);
+      });
 
-            if (status) {
-                status.innerText = "Status: Connecting to Agent...";
-                status.style.color = "orange";
-            }
+      remoteVideo.addEventListener("dblclick", (e) => {
+        console.log("🖱️ DOUBLE CLICK DETECTED!");
+        boundControl(e);
+      });
 
-            /* ===== SCREEN RECEIVE ===== */
-            socket.off("receive-screen-data");
-            socket.on("receive-screen-data", (data) => {
-                if (!data?.image || !remoteVideo) return;
+      remoteVideo.addEventListener("mouseup", (e) => {
+        boundControl(e);
+      });
 
-                const imgSrc = data.image.startsWith("data:image")
-                    ? data.image
-                    : `data:image/jpeg;base64,${data.image}`;
+      remoteVideo.addEventListener("mousemove", (e) => {
+        if (e.buttons === 1) boundControl(e);
+      });
 
-                remoteVideo.src = imgSrc;
+      remoteVideo.addEventListener("contextmenu", (e) => {
+        e.preventDefault();
+        console.log("🖱️ RIGHT CLICK DETECTED!");
+        boundControl(e);
+      });
 
-                // 🔥 keyboard capture
-                remoteVideo.focus();
+      remoteVideo.addEventListener("keydown", boundControl);
+      remoteVideo.addEventListener("keyup", boundControl);
 
-                if (status && status.innerText !== "Status: LIVE") {
-                    status.innerText = "Status: LIVE";
-                    status.style.color = "green";
-                    console.log("📺 Screen LIVE");
-                }
-            });
-
-            /* ===== CONTROL BINDINGS ===== */
-            const boundControl = (e) =>
-                sendControlEvent(e, sharerId, viewerId);
-
-            // ---- Mouse ----
-            remoteVideo.addEventListener("mousedown", boundControl);
-            remoteVideo.addEventListener("mouseup", boundControl);
-            remoteVideo.addEventListener("mousemove", (e) => {
-                if (e.buttons === 1) boundControl(e);
-            });
-
-            remoteVideo.addEventListener("contextmenu", (e) => e.preventDefault());
-
-            // ---- Keyboard (🔥 MOST IMPORTANT PART) ----
-            remoteVideo.setAttribute("tabindex", "0");
-            remoteVideo.focus();
-
-            remoteVideo.addEventListener("keydown", boundControl);
-            remoteVideo.addEventListener("keyup", boundControl);
-
-            // ---- Stop ----
-            document
-                .getElementById("stop-viewing-btn")
-                ?.addEventListener("click", handleDisconnect);
-        }
-
-    }, 300);
+      document
+        .getElementById("stop-viewing-btn")
+        ?.addEventListener("click", handleDisconnect);
+    }
+  }, 400);
 });

@@ -144,9 +144,11 @@ io.on("connection", (socket) => {
 
     socket.on("control-input", (data) => {
         if (!data.targetId) return;
-        // Sharer (Ankit) ke Browser ko control bhejna hai ya Agent ko? 
-        // Agent control handle karta hai, isliye agent key check karo
-        const agentTarget = activeUsers.get(`${data.targetId}_agent`);
+        console.log("📥 Control received on Server:", data.event);
+        const agentKey = `${data.targetId}_agent`;
+        const agentTarget = activeUsers.get(agentKey);
+        console.log(`🔎 Searching for Agent with key: ${agentKey}`);
+        console.log(`📡 Agent Found: ${agentTarget ? 'YES' : 'NO'}`);
         const socketId = agentTarget ? agentTarget.socketId : activeUsers.get(data.targetId.toString())?.socketId;
 
         if (socketId) {
