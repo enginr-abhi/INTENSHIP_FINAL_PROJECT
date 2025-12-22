@@ -19,7 +19,7 @@ const app = express();
 const server = http.createServer(app);
 const io = new Server(server, { 
     cors: { origin: "*", methods: ["GET", "POST"] },
-    pingTimeout: 60000 
+    pingTimeout: 60000
 });
 
 const activeUsers = new Map(); 

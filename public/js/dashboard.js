@@ -9,8 +9,7 @@ document.addEventListener("DOMContentLoaded", () => {
 
     if (!currentUserId) return;
 
-    // NOTE: user-online is handled by socket.js
-
+    // 1. Online Users List update karne ke liye
     socket.off("update-user-list");
     socket.on("update-user-list", (users) => {
         if (!userList) return;
@@ -35,6 +34,7 @@ document.addEventListener("DOMContentLoaded", () => {
         });
     });
 
+    // 2. Incoming Request Handle karne ke liye (FIXED)
     socket.off("incoming-request");
     socket.on("incoming-request", (data) => {
         requestContainer.classList.remove("hidden");
@@ -47,16 +47,15 @@ document.addEventListener("DOMContentLoaded", () => {
         `;
 
         document.getElementById("accept-btn").onclick = () => {
+            // Server ko inform karo accept ho gaya hai
             socket.emit("request-accepted", {
                 sharerId: currentUserId,
                 viewerId: data.senderId,
             });
 
-            requestContainer.innerHTML = `
-                <b class="text-green-400">✅ Accepted.</b> <br/>
-                <span>Now, please run the Agent program.</span>
-                <a href="/agent/agent.exe?user_id=${currentUserId}" download="agent.exe" class="bg-blue-600 text-white px-3 py-1.5 rounded-md text-sm mt-2 block w-full text-center">🚀 Run Agent.exe</a>
-            `;
+            // 🔥 FIX: Ankit (Sharer) ko uske sharing page par redirect karo
+            // Isse use screen.ejs dikhega jahan se wo Agent download karega
+            window.location.href = "/share/" + data.senderId;
         };
 
         document.getElementById("reject-btn").onclick = () => {
@@ -64,6 +63,7 @@ document.addEventListener("DOMContentLoaded", () => {
         };
     });
 
+    // 3. Viewer (Abhishek) ko redirect karne ke liye
     socket.off("redirect-to-view");
     socket.on("redirect-to-view", ({ sharerId }) => {
         window.location.href = "/view/" + sharerId;
