@@ -25,7 +25,10 @@ const io = new Server(server, {
 const activeUsers = new Map(); 
 const pendingShares = new Map(); 
 
-// Filter out agents so they don't show up in the dashboard list
+// --- THROTTLING LOGIC START ---
+const lastControlTime = new Map();
+// --- THROTTLING LOGIC END ---
+
 const getUserList = () => Array.from(activeUsers)
     .filter(([_, info]) => !info.isAgent) 
     .map(([userId, info]) => ({ 
@@ -64,11 +67,8 @@ io.on("connection", (socket) => {
         const userId = data.userId.toString();
         const isAgent = data.name === "Agent Sharer";
 
-        // 🔥 GHOST & COLLISION FIX:
-        // Agent aur Browser ko alag storageKey se save karo taaki ek doosre ko na kaatein
         const storageKey = isAgent ? `${userId}_agent` : userId;
 
-        // Purana duplicate hatao (Clean reconnect)
         if (activeUsers.has(storageKey)) {
             activeUsers.delete(storageKey);
         }
@@ -77,17 +77,15 @@ io.on("connection", (socket) => {
             socketId: socket.id,
             name: data.name || "User",
             isAgent: isAgent,
-            originalId: userId // Reference for mapping
+            originalId: userId 
         });
 
         console.log(`✅ ${isAgent ? 'AGENT' : 'USER'} Online: ${userId}`);
         io.emit("update-user-list", getUserList());
 
-        // 🟢 Case 1: Agar Abhishek (Viewer) naye page par redirect hua
         if (!isAgent) {
             pendingShares.forEach((vId, sId) => {
                 if (vId === userId) {
-                    // Ankit (Sharer) ka agent dhoondo uski unique key se
                     const agent = activeUsers.get(`${sId}_agent`);
                     if (agent) {
                         io.to(agent.socketId).emit("start-sharing", { targetId: userId });
@@ -97,7 +95,6 @@ io.on("connection", (socket) => {
             });
         }
 
-        // 🟢 Case 2: Agar Ankit (Sharer) ne Agent start kiya
         if (isAgent && pendingShares.has(userId)) {
             const viewerId = pendingShares.get(userId);
             io.to(socket.id).emit("start-sharing", { targetId: viewerId });
@@ -132,7 +129,6 @@ io.on("connection", (socket) => {
 
     socket.on("screen-update", (data) => {
         if (!data.targetId) return;
-        // Viewer hamesha simple ID se store hota hai
         const target = activeUsers.get(data.targetId.toString());
         if (target && target.socketId) {
             io.to(target.socketId).emit("receive-screen-data", {
@@ -144,11 +140,26 @@ io.on("connection", (socket) => {
 
     socket.on("control-input", (data) => {
         if (!data.targetId) return;
+
+        // --- NEW SAFETY FILTER FOR DEMO ---
+        const now = Date.now();
+        const lastTime = lastControlTime.get(socket.id) || 0;
+        
+        // Mouse move ko thoda limit karte hain taaki crash na ho, 
+        // par console.log sab chalenge
+        if (data.event && data.event.type === 'mousemove') {
+            if (now - lastTime < 30) return; // 30ms throttle
+            lastControlTime.set(socket.id, now);
+        }
+        // ----------------------------------
+
         console.log("📥 Control received on Server:", data.event);
         const agentKey = `${data.targetId}_agent`;
         const agentTarget = activeUsers.get(agentKey);
+        
         console.log(`🔎 Searching for Agent with key: ${agentKey}`);
         console.log(`📡 Agent Found: ${agentTarget ? 'YES' : 'NO'}`);
+        
         const socketId = agentTarget ? agentTarget.socketId : activeUsers.get(data.targetId.toString())?.socketId;
 
         if (socketId) {
@@ -164,6 +175,7 @@ io.on("connection", (socket) => {
             if (info.socketId === socket.id) {
                 console.log("❌ Offline:", key);
                 activeUsers.delete(key);
+                lastControlTime.delete(socket.id); // Clean up
                 break;
             }
         }
