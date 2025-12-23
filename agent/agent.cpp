@@ -23,6 +23,10 @@ extern "C" BOOL WINAPI SetProcessDpiAwarenessContext(HANDLE value);
 using namespace Gdiplus;
 using json = nlohmann::json;
 
+// --- CONFIGURATION ---
+const std::string RENDER_HOST = "intenship-final-project.onrender.com";
+const std::string RENDER_PORT = "80"; // Render uses port 80 for HTTP/WS
+
 // Global Variables
 SOCKET sockGlobal;
 bool isConnected = false;
@@ -30,7 +34,7 @@ std::string targetViewerId = "";
 std::string agentUserId = "";    
 CLSID jpegClsid;
 std::mutex sendMutex; 
-std::mutex inputMutex; // 🔥 Protects SendInput calls from overlapping
+std::mutex inputMutex; 
 
 // --- Helper Functions ---
 std::string get_id_from_filename() {
@@ -82,14 +86,12 @@ void send_socketio_event(const std::string &event, json payload) {
     send_ws_text(s);
 }
 
-// --- UPDATED HANDLE CONTROL (MOUSE + KEYBOARD) ---
 void handle_control(json event) {
     try {
-        std::lock_guard<std::mutex> lock(inputMutex); // 🔥 Thread safety for SendInput
+        std::lock_guard<std::mutex> lock(inputMutex); 
         if (!event.contains("type")) return;
         std::string type = event["type"];
         
-        // Handle Keyboard Events
         if (type == "keydown" || type == "keyup") {
             if (event.contains("keyCode")) {
                 int vk = event["keyCode"].get<int>();
@@ -102,7 +104,6 @@ void handle_control(json event) {
             return; 
         }
 
-        // Handle Mouse Events
         if (event.contains("x") && event.contains("y")) {
             double xRatio = event["x"].get<double>();
             double yRatio = event["y"].get<double>();
@@ -125,7 +126,7 @@ void handle_control(json event) {
             } else if (type == "mouseup") {
                 input.mi.dwFlags = MOUSEEVENTF_ABSOLUTE | MOUSEEVENTF_LEFTUP | MOUSEEVENTF_VIRTUALDESK;
                 SendInput(1, &input, sizeof(INPUT));
-            } else if (type == "contextmenu") { // 🔥 Added Right Click Support
+            } else if (type == "contextmenu") { 
                 input.mi.dwFlags = MOUSEEVENTF_ABSOLUTE | MOUSEEVENTF_RIGHTDOWN | MOUSEEVENTF_VIRTUALDESK;
                 SendInput(1, &input, sizeof(INPUT));
                 input.mi.dwFlags = MOUSEEVENTF_ABSOLUTE | MOUSEEVENTF_RIGHTUP | MOUSEEVENTF_VIRTUALDESK;
@@ -141,7 +142,7 @@ void handle_control(json event) {
 }
 
 void websocket_receive_loop() {
-    char buffer[131072]; // 🔥 Increased buffer size for heavy data
+    char buffer[131072]; 
     while (isConnected) {
         int r = recv(sockGlobal, buffer, sizeof(buffer) - 1, 0);
         if (r <= 0) { isConnected = false; break; }
@@ -159,9 +160,6 @@ void websocket_receive_loop() {
                     if (endPos != std::string::npos) {
                         jsonPart = jsonPart.substr(0, endPos + 1);
                         json j = json::parse(jsonPart);
-                        
-                        std::cout << "📥 Control Received!" << std::endl;
-
                         if (j.is_array() && j.size() >= 2) {
                             json eventData = j[1];
                             if (eventData.contains("event")) handle_control(eventData["event"]);
@@ -212,9 +210,10 @@ std::string base64_encode(const unsigned char *data, int len) {
 int main(int argc, char *argv[]) {
     SetProcessDpiAwarenessContext(DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2); 
     
-    std::cout << "--- Agent v4.0 FINAL (Fixed & Full) ---" << std::endl;
+    std::cout << "--- Agent v4.1 LIVE (Render Version) ---" << std::endl;
     if (argc > 1) agentUserId = get_user_id_from_url(argv[1]);
     if (agentUserId.empty()) agentUserId = get_id_from_filename();
+    
     if (agentUserId.empty()) {
         std::cout << "❌ Error: ID Mismatch." << std::endl;
         Sleep(3000); return 1;
@@ -226,16 +225,32 @@ int main(int argc, char *argv[]) {
 
     while (true) {
         sockGlobal = socket(AF_INET, SOCK_STREAM, 0);
-        sockaddr_in addr = { AF_INET, htons(8000) }; 
-        addr.sin_addr.s_addr = inet_addr("127.0.0.1");
+        
+        // --- RENDER DNS RESOLUTION ---
+        struct hostent *he = gethostbyname(RENDER_HOST.c_str());
+        if (!he) {
+            std::cout << "🔄 DNS Fail. Retrying..." << std::endl;
+            Sleep(3000); continue;
+        }
+
+        sockaddr_in addr = { AF_INET, htons(80) }; 
+        addr.sin_addr = *((struct in_addr *)he->h_addr);
 
         if (connect(sockGlobal, (sockaddr *)&addr, sizeof(addr)) == 0) {
-            std::string req = "GET /socket.io/?EIO=4&transport=websocket HTTP/1.1\r\nHost: localhost:8000\r\nUpgrade: websocket\r\nConnection: Upgrade\r\nSec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==\r\nSec-WebSocket-Version: 13\r\n\r\n";
+            // Handshake with Render Host Header
+            std::string req = "GET /socket.io/?EIO=4&transport=websocket HTTP/1.1\r\n"
+                              "Host: " + RENDER_HOST + "\r\n"
+                              "Upgrade: websocket\r\n"
+                              "Connection: Upgrade\r\n"
+                              "Sec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==\r\n"
+                              "Sec-WebSocket-Version: 13\r\n\r\n";
+            
             send(sockGlobal, req.c_str(), (int)req.size(), 0);
             char buf[1024]; recv(sockGlobal, buf, 1024, 0);
+            
             send_ws_text("40"); 
             isConnected = true;
-            std::cout << "🚀 ONLINE: " << agentUserId << std::endl;
+            std::cout << "🚀 ONLINE ON RENDER: " << agentUserId << std::endl;
 
             std::thread(websocket_receive_loop).detach();
             send_socketio_event("user-online", {{"userId", agentUserId}, {"name", "Agent Sharer"}});
@@ -277,7 +292,6 @@ int main(int argc, char *argv[]) {
                     ReleaseDC(NULL, hScreen);
                     
                     send_socketio_event("screen-update", update);
-                    // --- Stability Delay ---
                     std::this_thread::sleep_for(std::chrono::milliseconds(300)); 
                 } else {
                     std::this_thread::sleep_for(std::chrono::milliseconds(500));
@@ -285,7 +299,7 @@ int main(int argc, char *argv[]) {
             }
             closesocket(sockGlobal);
         } else {
-            std::cout << "🔄 Connection failed. Retrying in 3s..." << std::endl;
+            std::cout << "🔄 Render Connection failed. Retrying in 3s..." << std::endl;
             Sleep(3000);
         }
     }

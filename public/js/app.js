@@ -98,6 +98,7 @@ document.addEventListener("DOMContentLoaded", () => {
     socket.emit("user-online", {
       userId: viewerId,
       name: window.CURRENT_USER_NAME || "User",
+      isOnline: true
     });
 
     if (path.startsWith("/view/")) {

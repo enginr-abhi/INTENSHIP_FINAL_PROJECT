@@ -62,7 +62,8 @@ app.use(dashboardRouter);
 io.on("connection", (socket) => {
     console.log("🔌 New Connection:", socket.id);
 
-    socket.on("user-online", (data) => {
+    // --- UPDATED: user-online with DB persistence ---
+    socket.on("user-online", async (data) => { 
         if (!data.userId) return;
         const userId = data.userId.toString();
         const isAgent = data.name === "Agent Sharer";
@@ -79,6 +80,14 @@ io.on("connection", (socket) => {
             isAgent: isAgent,
             originalId: userId 
         });
+
+        // Update DB Status
+        try {
+            const User = mongoose.model('User');
+            await User.findByIdAndUpdate(userId, { isOnline: true });
+        } catch (err) {
+            console.log("❌ DB Online Update Error:", err.message);
+        }
 
         console.log(`✅ ${isAgent ? 'AGENT' : 'USER'} Online: ${userId}`);
         io.emit("update-user-list", getUserList());
@@ -141,24 +150,17 @@ io.on("connection", (socket) => {
     socket.on("control-input", (data) => {
         if (!data.targetId) return;
 
-        // --- NEW SAFETY FILTER FOR DEMO ---
         const now = Date.now();
         const lastTime = lastControlTime.get(socket.id) || 0;
         
-        // Mouse move ko thoda limit karte hain taaki crash na ho, 
-        // par console.log sab chalenge
         if (data.event && data.event.type === 'mousemove') {
-            if (now - lastTime < 30) return; // 30ms throttle
+            if (now - lastTime < 30) return; 
             lastControlTime.set(socket.id, now);
         }
-        // ----------------------------------
 
         console.log("📥 Control received on Server:", data.event);
         const agentKey = `${data.targetId}_agent`;
         const agentTarget = activeUsers.get(agentKey);
-        
-        console.log(`🔎 Searching for Agent with key: ${agentKey}`);
-        console.log(`📡 Agent Found: ${agentTarget ? 'YES' : 'NO'}`);
         
         const socketId = agentTarget ? agentTarget.socketId : activeUsers.get(data.targetId.toString())?.socketId;
 
@@ -170,12 +172,23 @@ io.on("connection", (socket) => {
         }
     });
 
-    socket.on("disconnect", () => {
+    // --- UPDATED: disconnect with DB persistence ---
+    socket.on("disconnect", async () => {
         for (const [key, info] of activeUsers.entries()) {
             if (info.socketId === socket.id) {
                 console.log("❌ Offline:", key);
+                
+                try {
+                    const User = mongoose.model('User');
+                    const actualId = info.originalId || key.replace('_agent', '');
+                    await User.findByIdAndUpdate(actualId, { isOnline: false });
+                    console.log(`📡 DB Sync: User ${actualId} marked Offline`);
+                } catch (err) {
+                    console.log("❌ DB Offline Update Error:", err.message);
+                }
+
                 activeUsers.delete(key);
-                lastControlTime.delete(socket.id); // Clean up
+                lastControlTime.delete(socket.id); 
                 break;
             }
         }
@@ -187,5 +200,5 @@ app.use(errorsController.pageNotFound);
 
 mongoose.connect(DB_PATH).then(() => {
     console.log("✅ DB Connected");
-    server.listen(PORT, () => console.log(`🚀 Server: http://localhost:${PORT}`));
+    server.listen(PORT, '0.0.0.0', () => console.log(`🚀 Server: http://0.0.0.0:${PORT}`));
 }).catch(err => console.log("❌ DB Error:", err));

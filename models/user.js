@@ -23,7 +23,8 @@ const userSchema = mongoose.Schema({
   favourites: [{
     type: mongoose.Schema.Types.ObjectId,
     ref: 'Home'
-  }]
+  }],
+  isOnline: { type: Boolean, default: false }
 });
 
 module.exports = mongoose.model('User', userSchema);

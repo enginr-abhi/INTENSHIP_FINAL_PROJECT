@@ -8,7 +8,10 @@ exports.getDashboard = async (req, res, next) => {
     const loggedUser = req.session.user;
     if (!loggedUser) return res.redirect("/login");
 
-    const allUsers = await User.find({ _id: { $ne: loggedUser._id } });
+    const allUsers = await User.find({
+       _id: { $ne: loggedUser._id },
+       isOnline: true
+      });
 
     res.render("admin/admin-Dashboard-List", {
       pageTitle: "Dashboard",
