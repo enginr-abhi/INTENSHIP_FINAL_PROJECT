@@ -91,11 +91,10 @@ io.on("connection", (socket) => {
 
         // FIX: Agar Agent online aaya aur viewer pehle se wait kar raha hai
         if (isAgent && pendingShares.has(userId)) {
-            const viewerId = pendingShares.get(userId);
-            const viewer = getUser(viewerId);
-            if (viewer) {
-                io.to(socket.id).emit("start-sharing", { targetId: viewer.socketId });
-            }
+            const viewerId = pendingShares.get(userId);;
+            // Agent ko Viewer ki MongoDB ID bhejo (Socket ID nahi!)
+        io.to(socket.id).emit("start-sharing", { targetId: viewerId });
+        console.log(`🎯 Re-matched Agent ${userId} to Viewer ${viewerId}`);
         }
     });
 
@@ -122,17 +121,20 @@ io.on("connection", (socket) => {
             io.to(viewer.socketId).emit("redirect-to-view", { sharerId: sharerId });
             
             // ✅ CRITICAL FIX: Agent ko turant signal bhejo ki wo sharer ko screen dikhaye
+            // AGENT KO SIGNAL: Target as Viewer's MongoDB ID
             if (agent) {
-                io.to(agent.socketId).emit("start-sharing", { targetId: viewer.socketId });
-                console.log(`📢 Start-Sharing sent to Agent for Viewer: ${viewer.socketId}`);
+                io.to(agent.socketId).emit("start-sharing", { targetId: viewerId });
+                console.log(`📢 Agent ${sharerId} starting for Viewer ${viewerId}`);
             }
         }
     });
 
     socket.on("screen-update", (data) => {
+        if (!data.targetId) return;
         // Data ab seedha Viewer ki Socket ID par jayega
-        if (data.targetId) {
-            io.to(data.targetId).emit("receive-screen-data", {
+        const viewer = activeUsers.get(data.targetId.toString());
+        if (viewer && viewer.socketId) {
+            io.to(viewer.socketId).emit("receive-screen-data", {
                 senderId: data.senderId,
                 image: data.image
             });
@@ -141,11 +143,18 @@ io.on("connection", (socket) => {
 
     socket.on("control-input", (data) => {
         if (!data.targetId) return;
+        // Throttling logic (Old version )
+       const now = Date.now();
+        const lastTime = lastControlTime.get(socket.id) || 0;
+        if (data.event && data.event.type === 'mousemove') {
+            if (now - lastTime < 30) return;
+            lastControlTime.set(socket.id, now);
+        }
         const agentKey = `${data.targetId}_agent`;
         const agentTarget = activeUsers.get(agentKey);
         
         // Agar agent hai toh use bhejo, nahi toh normal user ko
-        const targetSocket = agentTarget ? agentTarget.socketId : getUser(data.targetId)?.socketId;
+        const targetSocket = agentTarget ? agentTarget.socketId : null;
 
         if (targetSocket) {
             io.to(targetSocket).emit("receive-control-input", {

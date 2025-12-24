@@ -22,8 +22,9 @@ function sendControlEvent(e, sharerId, viewerId) {
         if (e.type === "contextmenu") e.preventDefault();
         
         // Exact percentage calculation including scroll offset
-        const xPercent = (e.clientX - rect.left) / rect.width;
-        const yPercent = (e.clientY - rect.top) / rect.height;
+// ✅ FIXED LOGIC (Ye zyada accurate hai):
+const xPercent = (e.pageX - (rect.left + window.scrollX)) / rect.width;
+const yPercent = (e.pageY - (rect.top + window.scrollY)) / rect.height;
 
         // Boundary check (Coordinate image ke bahar na jaye)
         if (xPercent < 0 || xPercent > 1 || yPercent < 0 || yPercent > 1) return;

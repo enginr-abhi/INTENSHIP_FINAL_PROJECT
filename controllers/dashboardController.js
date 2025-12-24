@@ -13,7 +13,7 @@ exports.getDashboard = async (req, res, next) => {
     const allUsers = await User.find({
         _id: { $ne: loggedUser._id },
         isOnline: true
-    }).lean(); // .lean() performance ke liye accha hai
+    }).select("firstName lastName email").lean(); // .lean() performance ke liye accha hai
 
     res.render("admin/admin-Dashboard-List", { // 👈 Make sure file name matches
       pageTitle: "Dashboard",
