@@ -1,4 +1,3 @@
-/* This is a C++ file for an agent that connects to a WebSocket server and handles user input and screen capture */
 #include <winsock2.h>
 #include <windows.h>
 #include <gdiplus.h>
@@ -8,7 +7,7 @@
 #include <string>
 #include <mutex> 
 #include <algorithm>
-#include <shellscalingapi.h> // ✅ DPI Fix ke liye header
+#include <shellscalingapi.h>
 #include "json.hpp" 
 
 #pragma comment(lib, "Ws2_32.lib")
@@ -16,16 +15,12 @@
 #pragma comment(lib, "gdi32.lib")
 #pragma comment(lib, "user32.lib")
 #pragma comment(lib, "ole32.lib")
-#pragma comment(lib, "Shcore.lib") // ✅ DPI Fix ke liye library
+#pragma comment(lib, "Shcore.lib")
 
 using namespace Gdiplus;
 using json = nlohmann::json;
 
-// --- CONFIGURATION ---
 const std::string RENDER_HOST = "intenship-final-project.onrender.com";
-const std::string RENDER_PORT = "80"; 
-
-// Global Variables
 SOCKET sockGlobal;
 bool isConnected = false;
 std::string targetViewerId = ""; 
@@ -34,8 +29,7 @@ CLSID jpegClsid;
 std::mutex sendMutex; 
 std::mutex inputMutex; 
 
-// --- Helper Functions ---
-
+// ⭐ FIXED ID EXTRACTION: Ab ye (9) ya space se confuse nahi hoga
 std::string get_id_from_filename() {
     char path[MAX_PATH];
     GetModuleFileNameA(NULL, path, MAX_PATH);
@@ -44,11 +38,9 @@ std::string get_id_from_filename() {
     std::string filename = (lastSlash == std::string::npos) ? fullPath : fullPath.substr(lastSlash + 1);
     
     size_t start = filename.find("agent_");
-    size_t end = filename.find(".exe");
-    if (start != std::string::npos && end != std::string::npos) {
-        std::string rawId = filename.substr(start + 6, end - (start + 6));
-        size_t extraPos = rawId.find_first_of(" ("); 
-        if (extraPos != std::string::npos) rawId = rawId.substr(0, extraPos);
+    if (start != std::string::npos) {
+        // MongoDB ID 24 characters ki hoti hai, hum wahi fix uthayenge
+        std::string rawId = filename.substr(start + 6, 24); 
         return rawId;
     }
     return "";
@@ -99,9 +91,6 @@ void handle_control(json event) {
         if (event.contains("x") && event.contains("y")) {
             double xRatio = event["x"].get<double>();
             double yRatio = event["y"].get<double>();
-            xRatio = (std::max)(0.0, (std::min)(1.0, xRatio));
-            yRatio = (std::max)(0.0, (std::min)(1.0, yRatio));
-            
             int absX = (int)(xRatio * 65535.0f);
             int absY = (int)(yRatio * 65535.0f);
 
@@ -148,15 +137,11 @@ void websocket_receive_loop() {
             if (startPos != std::string::npos) {
                 try {
                     std::string jsonPart = raw.substr(startPos);
-                    size_t endPos = jsonPart.find_last_of("]");
-                    if (endPos != std::string::npos) {
-                        jsonPart = jsonPart.substr(0, endPos + 1);
-                        json j = json::parse(jsonPart);
-                        if (j.is_array() && j.size() >= 2) {
-                            json eventData = j[1];
-                            if (eventData.contains("event")) handle_control(eventData["event"]);
-                            else handle_control(eventData);
-                        }
+                    json j = json::parse(jsonPart);
+                    if (j.is_array() && j.size() >= 2) {
+                        json eventData = j[1];
+                        if (eventData.contains("event")) handle_control(eventData["event"]);
+                        else handle_control(eventData);
                     }
                 } catch (...) {}
             }
@@ -164,10 +149,9 @@ void websocket_receive_loop() {
             size_t pos = raw.find("[");
             if (pos != std::string::npos) {
                 try {
-                    std::string jStr = raw.substr(pos);
-                    json j = json::parse(jStr);
+                    json j = json::parse(raw.substr(pos));
                     targetViewerId = j[1]["targetId"].get<std::string>();
-                    std::cout << "📢 Connected to Viewer: " << targetViewerId << std::endl;
+                    std::cout << "📢 SUCCESS: Connected to Viewer: " << targetViewerId << std::endl;
                 } catch(...) {}
             }
         }
@@ -200,14 +184,12 @@ std::string base64_encode(const unsigned char *data, int len) {
 }
 
 int main(int argc, char *argv[]) {
-    // ✅ Robust DPI Awareness Fix (No Red Underlines)
     SetProcessDpiAwareness(PROCESS_PER_MONITOR_DPI_AWARE);
+    std::cout << "--- Agent v5.0 FINAL (ID-Protected) ---" << std::endl;
     
-    std::cout << "--- Agent v4.3 LIVE (Render Version) ---" << std::endl;
     agentUserId = get_id_from_filename();
-    
     if (agentUserId.empty()) {
-        std::cout << "❌ Error: ID Mismatch. Rename file to agent_<ID>.exe" << std::endl;
+        std::cout << "❌ Error: Could not find ID in filename." << std::endl;
         Sleep(3000); return 1;
     }
 
@@ -218,10 +200,7 @@ int main(int argc, char *argv[]) {
     while (true) {
         sockGlobal = socket(AF_INET, SOCK_STREAM, 0);
         struct hostent *he = gethostbyname(RENDER_HOST.c_str());
-        if (!he) {
-            std::cout << "🔄 DNS Fail. Retrying..." << std::endl;
-            Sleep(3000); continue;
-        }
+        if (!he) { Sleep(3000); continue; }
 
         sockaddr_in addr = { AF_INET, htons(80) }; 
         addr.sin_addr = *((struct in_addr *)he->h_addr);
@@ -233,13 +212,12 @@ int main(int argc, char *argv[]) {
                               "Connection: Upgrade\r\n"
                               "Sec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==\r\n"
                               "Sec-WebSocket-Version: 13\r\n\r\n";
-            
             send(sockGlobal, req.c_str(), (int)req.size(), 0);
             char buf[1024]; recv(sockGlobal, buf, 1024, 0);
             
             send_ws_text("40"); 
             isConnected = true;
-            std::cout << "🚀 ONLINE ON RENDER: " << agentUserId << std::endl;
+            std::cout << "🚀 AGENT ONLINE: " << agentUserId << std::endl;
 
             std::thread(websocket_receive_loop).detach();
             send_socketio_event("user-online", {{"userId", agentUserId}, {"name", "Agent Sharer"}});
@@ -260,7 +238,7 @@ int main(int argc, char *argv[]) {
                     ep.Parameter[0].Guid = EncoderQuality;
                     ep.Parameter[0].Type = EncoderParameterValueTypeLong;
                     ep.Parameter[0].NumberOfValues = 1;
-                    ULONG q = 35; 
+                    ULONG q = 40; 
                     ep.Parameter[0].Value = &q;
 
                     Bitmap bmp(hBitmap, NULL);
@@ -281,16 +259,15 @@ int main(int argc, char *argv[]) {
                     ReleaseDC(NULL, hScreen);
                     
                     send_socketio_event("screen-update", update);
-                    std::this_thread::sleep_for(std::chrono::milliseconds(250)); 
+                    std::this_thread::sleep_for(std::chrono::milliseconds(200)); 
                 } else {
                     std::this_thread::sleep_for(std::chrono::milliseconds(500));
                 }
             }
             closesocket(sockGlobal);
-        } else {
-            std::cout << "🔄 Render Connection failed. Retrying in 3s..." << std::endl;
-            Sleep(3000);
         }
+        std::cout << "🔄 Reconnecting..." << std::endl;
+        Sleep(3000);
     }
     GdiplusShutdown(token); 
     return 0;
