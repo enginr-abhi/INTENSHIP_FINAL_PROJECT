@@ -29,19 +29,16 @@ CLSID jpegClsid;
 std::mutex sendMutex; 
 std::mutex inputMutex; 
 
-// ⭐ FIXED ID EXTRACTION: Ab ye (9) ya space se confuse nahi hoga
+// ID Extraction from filename
 std::string get_id_from_filename() {
     char path[MAX_PATH];
     GetModuleFileNameA(NULL, path, MAX_PATH);
     std::string fullPath = path;
     size_t lastSlash = fullPath.find_last_of("\\/");
     std::string filename = (lastSlash == std::string::npos) ? fullPath : fullPath.substr(lastSlash + 1);
-    
     size_t start = filename.find("agent_");
     if (start != std::string::npos) {
-        // MongoDB ID 24 characters ki hoti hai, hum wahi fix uthayenge
-        std::string rawId = filename.substr(start + 6, 24); 
-        return rawId;
+        return filename.substr(start + 6, 24); 
     }
     return "";
 }
@@ -130,18 +127,16 @@ void websocket_receive_loop() {
         buffer[r] = '\0';
         std::string raw(buffer);
 
+        // Render Keep-Alive: 2 (Ping) ka jawab 3 (Pong) se dena hai
         if (raw[0] == '2') { send_ws_text("3"); continue; }
         
         if (raw.find("receive-control-input") != std::string::npos) {
             size_t startPos = raw.find("[");
             if (startPos != std::string::npos) {
                 try {
-                    std::string jsonPart = raw.substr(startPos);
-                    json j = json::parse(jsonPart);
+                    json j = json::parse(raw.substr(startPos));
                     if (j.is_array() && j.size() >= 2) {
-                        json eventData = j[1];
-                        if (eventData.contains("event")) handle_control(eventData["event"]);
-                        else handle_control(eventData);
+                        handle_control(j[1]["event"]);
                     }
                 } catch (...) {}
             }
@@ -160,15 +155,12 @@ void websocket_receive_loop() {
 
 void init_jpeg() {
     UINT num, size; GetImageEncodersSize(&num, &size);
-    if (size == 0) return;
-    ImageCodecInfo* pImageCodecInfo = (ImageCodecInfo*)(malloc(size));
-    GetImageEncoders(num, size, pImageCodecInfo);
+    ImageCodecInfo* p = (ImageCodecInfo*)(malloc(size));
+    GetImageEncoders(num, size, p);
     for (UINT j = 0; j < num; ++j) {
-        if (wcscmp(pImageCodecInfo[j].MimeType, L"image/jpeg") == 0) {
-            jpegClsid = pImageCodecInfo[j].Clsid; break;
-        }
+        if (wcscmp(p[j].MimeType, L"image/jpeg") == 0) { jpegClsid = p[j].Clsid; break; }
     }
-    free(pImageCodecInfo);
+    free(p);
 }
 
 std::string base64_encode(const unsigned char *data, int len) {
@@ -185,11 +177,11 @@ std::string base64_encode(const unsigned char *data, int len) {
 
 int main(int argc, char *argv[]) {
     SetProcessDpiAwareness(PROCESS_PER_MONITOR_DPI_AWARE);
-    std::cout << "--- Agent v5.0 FINAL (ID-Protected) ---" << std::endl;
+    std::cout << "--- Agent v5.5 FINAL (Render Stable) ---" << std::endl;
     
     agentUserId = get_id_from_filename();
     if (agentUserId.empty()) {
-        std::cout << "❌ Error: Could not find ID in filename." << std::endl;
+        std::cout << "❌ Error: ID not found in filename." << std::endl;
         Sleep(3000); return 1;
     }
 
@@ -201,67 +193,56 @@ int main(int argc, char *argv[]) {
         sockGlobal = socket(AF_INET, SOCK_STREAM, 0);
         struct hostent *he = gethostbyname(RENDER_HOST.c_str());
         if (!he) { Sleep(3000); continue; }
-
         sockaddr_in addr = { AF_INET, htons(80) }; 
         addr.sin_addr = *((struct in_addr *)he->h_addr);
 
         if (connect(sockGlobal, (sockaddr *)&addr, sizeof(addr)) == 0) {
-            std::string req = "GET /socket.io/?EIO=4&transport=websocket HTTP/1.1\r\n"
-                              "Host: " + RENDER_HOST + "\r\n"
-                              "Upgrade: websocket\r\n"
-                              "Connection: Upgrade\r\n"
-                              "Sec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==\r\n"
-                              "Sec-WebSocket-Version: 13\r\n\r\n";
+            std::string req = "GET /socket.io/?EIO=4&transport=websocket HTTP/1.1\r\nHost: " + RENDER_HOST + "\r\nUpgrade: websocket\r\nConnection: Upgrade\r\nSec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==\r\nSec-WebSocket-Version: 13\r\n\r\n";
             send(sockGlobal, req.c_str(), (int)req.size(), 0);
-            char buf[1024]; recv(sockGlobal, buf, 1024, 0);
             
-            send_ws_text("40"); 
-            isConnected = true;
-            std::cout << "🚀 AGENT ONLINE: " << agentUserId << std::endl;
+            char buf[1024]; recv(sockGlobal, buf, 1024, 0);
+            send_ws_text("40"); // Socket.io Connect
+            
+            // ⭐ CRITICAL FIX: Handshake confirmation wait
+            char hBuf[1024]; 
+            if (recv(sockGlobal, hBuf, sizeof(hBuf), 0) > 0) {
+                isConnected = true;
+                std::cout << "🚀 AGENT ONLINE: " << agentUserId << std::endl;
+                std::thread(websocket_receive_loop).detach();
+                send_socketio_event("user-online", {{"userId", agentUserId}, {"name", "Agent Sharer"}});
 
-            std::thread(websocket_receive_loop).detach();
-            send_socketio_event("user-online", {{"userId", agentUserId}, {"name", "Agent Sharer"}});
+                while (isConnected) {
+                    if (!targetViewerId.empty()) {
+                        HDC hScreen = GetDC(NULL); 
+                        HDC hDC = CreateCompatibleDC(hScreen);
+                        int sw = GetSystemMetrics(SM_CXSCREEN), sh = GetSystemMetrics(SM_CYSCREEN);
+                        HBITMAP hBitmap = CreateCompatibleBitmap(hScreen, sw, sh);
+                        SelectObject(hDC, hBitmap);
+                        BitBlt(hDC, 0, 0, sw, sh, hScreen, 0, 0, SRCCOPY);
+                        
+                        IStream *stream = NULL; CreateStreamOnHGlobal(NULL, TRUE, &stream);
+                        EncoderParameters ep; ep.Count = 1; ep.Parameter[0].Guid = EncoderQuality;
+                        ep.Parameter[0].Type = EncoderParameterValueTypeLong; ep.Parameter[0].NumberOfValues = 1;
+                        ULONG q = 35; ep.Parameter[0].Value = &q;
 
-            while (isConnected) {
-                if (!targetViewerId.empty()) {
-                    HDC hScreen = GetDC(NULL); 
-                    HDC hDC = CreateCompatibleDC(hScreen);
-                    int sw = GetSystemMetrics(SM_CXSCREEN);
-                    int sh = GetSystemMetrics(SM_CYSCREEN);
-                    HBITMAP hBitmap = CreateCompatibleBitmap(hScreen, sw, sh);
-                    SelectObject(hDC, hBitmap);
-                    BitBlt(hDC, 0, 0, sw, sh, hScreen, 0, 0, SRCCOPY);
-                    
-                    IStream *stream = NULL; 
-                    CreateStreamOnHGlobal(NULL, TRUE, &stream);
-                    EncoderParameters ep; ep.Count = 1;
-                    ep.Parameter[0].Guid = EncoderQuality;
-                    ep.Parameter[0].Type = EncoderParameterValueTypeLong;
-                    ep.Parameter[0].NumberOfValues = 1;
-                    ULONG q = 40; 
-                    ep.Parameter[0].Value = &q;
-
-                    Bitmap bmp(hBitmap, NULL);
-                    bmp.Save(stream, &jpegClsid, &ep);
-                    
-                    HGLOBAL hMem; 
-                    GetHGlobalFromStream(stream, &hMem);
-                    SIZE_T size = GlobalSize(hMem);
-                    void *data = GlobalLock(hMem);
-                    
-                    json update;
-                    update["senderId"] = agentUserId;
-                    update["targetId"] = targetViewerId;
-                    update["image"] = base64_encode((unsigned char*)data, (int)size);
-                    
-                    GlobalUnlock(hMem); stream->Release(); 
-                    DeleteObject(hBitmap); DeleteDC(hDC); 
-                    ReleaseDC(NULL, hScreen);
-                    
-                    send_socketio_event("screen-update", update);
-                    std::this_thread::sleep_for(std::chrono::milliseconds(200)); 
-                } else {
-                    std::this_thread::sleep_for(std::chrono::milliseconds(500));
+                        Bitmap bmp(hBitmap, NULL); bmp.Save(stream, &jpegClsid, &ep);
+                        HGLOBAL hMem; GetHGlobalFromStream(stream, &hMem);
+                        SIZE_T size = GlobalSize(hMem); void *data = GlobalLock(hMem);
+                        
+                        json update;
+                        update["senderId"] = agentUserId;
+                        update["targetId"] = targetViewerId;
+                        update["image"] = base64_encode((unsigned char*)data, (int)size);
+                        
+                        GlobalUnlock(hMem); stream->Release(); 
+                        DeleteObject(hBitmap); DeleteDC(hDC); ReleaseDC(NULL, hScreen);
+                        
+                        send_socketio_event("screen-update", update);
+                        std::this_thread::sleep_for(std::chrono::milliseconds(250)); 
+                    } else {
+                        send_ws_text("2"); // Keep connection alive
+                        std::this_thread::sleep_for(std::chrono::milliseconds(2000));
+                    }
                 }
             }
             closesocket(sockGlobal);

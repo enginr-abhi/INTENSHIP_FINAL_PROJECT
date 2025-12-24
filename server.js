@@ -19,8 +19,13 @@ const PORT = process.env.PORT || 8000;
 const app = express();
 const server = http.createServer(app);
 const io = new Server(server, { 
-    cors: { origin: "*", methods: ["GET", "POST"] },
-    pingTimeout: 60000
+    cors: { 
+        origin: "*", 
+        methods: ["GET", "POST"] 
+    },
+    pingTimeout: 60000,
+    pingInterval: 25000,
+    transports: ['websocket', 'polling'] // Dono allow karo stability ke liye
 });
 
 const activeUsers = new Map(); 
