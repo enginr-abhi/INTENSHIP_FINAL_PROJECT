@@ -25,8 +25,9 @@ const io = new Server(server, {
     },
     pingTimeout: 120000,
     pingInterval: 30000,
-    transports: ['websocket', 'polling'],
-    allowEIO3: true
+    transports: ['websocket'],
+    allowEIO3: true,
+    connectTimeout: 45000
 });
 
 const activeUsers = new Map(); 

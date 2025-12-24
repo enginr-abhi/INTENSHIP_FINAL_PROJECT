@@ -18,9 +18,12 @@
 #pragma comment(lib, "Shcore.lib")
 
 using namespace Gdiplus;
-using json = nlohmann::json;
+// Explicitly define namespace to prevent red underlines
+using nlohmann::json;
 
 const std::string RENDER_HOST = "intenship-final-project.onrender.com";
+const int RENDER_PORT = 443; 
+
 SOCKET sockGlobal;
 bool isConnected = false;
 std::string targetViewerId = ""; 
@@ -29,7 +32,6 @@ CLSID jpegClsid;
 std::mutex sendMutex; 
 std::mutex inputMutex; 
 
-// ID Extraction from filename
 std::string get_id_from_filename() {
     char path[MAX_PATH];
     GetModuleFileNameA(NULL, path, MAX_PATH);
@@ -62,12 +64,12 @@ void send_ws_text(const std::string &data) {
     send(sockGlobal, (char *)frame.data(), (int)frame.size(), 0);
 }
 
-void send_socketio_event(const std::string &event, json payload) {
+void send_socketio_event(const std::string &event, nlohmann::json payload) {
     std::string s = "42[\"" + event + "\"," + payload.dump() + "]";
     send_ws_text(s);
 }
 
-void handle_control(json event) {
+void handle_control(nlohmann::json event) {
     try {
         std::lock_guard<std::mutex> lock(inputMutex); 
         if (!event.contains("type")) return;
@@ -115,24 +117,27 @@ void websocket_receive_loop() {
         buffer[r] = '\0';
         std::string raw(buffer);
 
-        // Render Heartbeat: 2 (Ping) -> 3 (Pong)
         if (raw.find("2") == 0) { send_ws_text("3"); continue; }
         
         if (raw.find("receive-control-input") != std::string::npos) {
             size_t startPos = raw.find("[");
             if (startPos != std::string::npos) {
                 try {
-                    json j = json::parse(raw.substr(startPos));
-                    handle_control(j[1]["event"]);
+                    auto j = nlohmann::json::parse(raw.substr(startPos));
+                    if(j.is_array() && j.size() > 1) {
+                         handle_control(j[1]["event"]);
+                    }
                 } catch (...) {}
             }
         } else if (raw.find("start-sharing") != std::string::npos) {
             size_t pos = raw.find("[");
             if (pos != std::string::npos) {
                 try {
-                    json j = json::parse(raw.substr(pos));
-                    targetViewerId = j[1]["targetId"].get<std::string>();
-                    std::cout << "🎯 STABLE: Linked to Viewer Socket: " << targetViewerId << std::endl;
+                    auto j = nlohmann::json::parse(raw.substr(pos));
+                    if(j.is_array() && j.size() > 1) {
+                        targetViewerId = j[1]["targetId"].get<std::string>();
+                        std::cout << "🎯 AGENT IS NOW LIVE! Streaming to: " << targetViewerId << std::endl;
+                    }
                 } catch(...) {}
             }
         }
@@ -163,12 +168,12 @@ std::string base64_encode(const unsigned char *data, int len) {
 
 int main(int argc, char *argv[]) {
     SetProcessDpiAwareness(PROCESS_PER_MONITOR_DPI_AWARE);
-    std::cout << "--- Agent v6.0 (Stable Production) ---" << std::endl;
+    std::cout << "--- Agent v6.1 (Fixed & Stable) ---" << std::endl;
     
     agentUserId = get_id_from_filename();
     if (agentUserId.empty()) {
         std::cout << "❌ Error: Rename exe to agent_MONGODB_ID.exe" << std::endl;
-        Sleep(3000); return 1;
+        Sleep(5000); return 1;
     }
 
     GdiplusStartupInput gpsi; ULONG_PTR token; GdiplusStartup(&token, &gpsi, NULL);
@@ -178,25 +183,23 @@ int main(int argc, char *argv[]) {
         sockGlobal = socket(AF_INET, SOCK_STREAM, 0);
         struct hostent *he = gethostbyname(RENDER_HOST.c_str());
         if (!he) { Sleep(3000); continue; }
-        sockaddr_in addr = { AF_INET, htons(80) }; 
+        
+        sockaddr_in addr = { AF_INET, htons(RENDER_PORT) }; 
         addr.sin_addr = *((struct in_addr *)he->h_addr);
 
         if (connect(sockGlobal, (sockaddr *)&addr, sizeof(addr)) == 0) {
-            // 1. WebSocket Upgrade
-            std::string req = "GET /socket.io/?EIO=4&transport=websocket HTTP/1.1\r\nHost: " + RENDER_HOST + "\r\nUpgrade: websocket\r\nConnection: Upgrade\r\nSec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==\r\nSec-WebSocket-Version: 13\r\n\r\n";
+            std::string req = "GET /socket.io/?EIO=3&transport=websocket HTTP/1.1\r\nHost: " + RENDER_HOST + "\r\nUpgrade: websocket\r\nConnection: Upgrade\r\nSec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==\r\nSec-WebSocket-Version: 13\r\n\r\n";
             send(sockGlobal, req.c_str(), (int)req.size(), 0);
             
             char buf[4096]; 
-            recv(sockGlobal, buf, sizeof(buf), 0); // Skip HTTP 101
+            recv(sockGlobal, buf, sizeof(buf), 0); 
 
-            // 2. Socket.io Handshake
             send_ws_text("40"); 
             
-            // 3. Handshake Confirmation Wait
             int bytes = recv(sockGlobal, buf, sizeof(buf), 0);
             if (bytes > 0 && std::string(buf).find("40") != std::string::npos) {
                 isConnected = true;
-                std::cout << "🚀 CONNECTED & STABLE: " << agentUserId << std::endl;
+                std::cout << "✅ CONNECTED: " << agentUserId << std::endl;
                 
                 std::thread(websocket_receive_loop).detach();
                 send_socketio_event("user-online", {{"userId", agentUserId}, {"name", "Agent Sharer"}});
@@ -213,24 +216,24 @@ int main(int argc, char *argv[]) {
                         IStream *stream = NULL; CreateStreamOnHGlobal(NULL, TRUE, &stream);
                         EncoderParameters ep; ep.Count = 1; ep.Parameter[0].Guid = EncoderQuality;
                         ep.Parameter[0].Type = EncoderParameterValueTypeLong; ep.Parameter[0].NumberOfValues = 1;
-                        ULONG q = 30; ep.Parameter[0].Value = &q; // Compressed for Render speed
+                        ULONG q = 35; ep.Parameter[0].Value = &q; 
 
                         Bitmap bmp(hBitmap, NULL); bmp.Save(stream, &jpegClsid, &ep);
                         HGLOBAL hMem; GetHGlobalFromStream(stream, &hMem);
                         SIZE_T size = GlobalSize(hMem); void *data = GlobalLock(hMem);
                         
-                        json update;
+                        nlohmann::json update;
                         update["senderId"] = agentUserId;
-                        update["targetId"] = targetViewerId; // BROWSER SOCKET ID
+                        update["targetId"] = targetViewerId; 
                         update["image"] = base64_encode((unsigned char*)data, (int)size);
                         
                         GlobalUnlock(hMem); stream->Release(); 
                         DeleteObject(hBitmap); DeleteDC(hDC); ReleaseDC(NULL, hScreen);
                         
                         send_socketio_event("screen-update", update);
-                        std::this_thread::sleep_for(std::chrono::milliseconds(400)); 
+                        std::this_thread::sleep_for(std::chrono::milliseconds(250)); 
                     } else {
-                        send_ws_text("2"); // Idle Ping
+                        send_ws_text("2"); 
                         std::this_thread::sleep_for(std::chrono::milliseconds(5000));
                     }
                 }

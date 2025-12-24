@@ -8,6 +8,7 @@
 <body class="bg-gray-100 min-h-screen text-gray-800 no-select"
       data-user-id="<%= currentUserId %>"
       data-peer-id="<%= peerId %>"
+      data-user-name="<%= user ? user.firstName : 'User' %>"
       data-role="<%= role %>">
  <%- include('../partials/nav') %>
 
@@ -81,13 +82,14 @@
 
         <img id="remote-video"
              src=""
+             tabindex="0"
              draggable="false"
              oncontextmenu="return false;"
-             class="w-full h-auto bg-gray-900"
+             class="w-full h-auto bg-gray-900 outline-none"
              style="min-height: 400px; display: block;"
              alt="Live Stream Feed" />
 
-        <div id="status-overlay" class="absolute inset-0 flex items-center justify-center bg-black bg-opacity-70 text-white font-bold">
+        <div id="status-overlay" class="absolute inset-0 flex items-center justify-center bg-black bg-opacity-70 text-white font-bold pointer-events-none">
             <p id="connection-status" class="animate-pulse text-lg">Waiting for Agent Image Data...</p>
         </div>
     </div>
