@@ -6,9 +6,7 @@ const MongoDBStore = require("connect-mongodb-session")(session);
 const { Server } = require("socket.io");
 const mongoose = require("mongoose");
 
-// ✅ FIX 1: Model ko yahan require kar lo taaki 'User' hamesha registered rahe
 const User = require("./models/user"); 
-
 const homeRouter = require("./routes/homeRouter");
 const authRouter = require("./routes/authRouter");
 const dashboardRouter = require("./routes/dashboardRouter");
@@ -29,7 +27,6 @@ const activeUsers = new Map();
 const pendingShares = new Map(); 
 const lastControlTime = new Map();
 
-// Filter logic: Dashboard par wahi dikhenge jo login hain (Agents nahi)
 const getUserList = () => Array.from(activeUsers)
     .filter(([_, info]) => !info.isAgent)
     .map(([userId, info]) => ({ 
@@ -69,10 +66,6 @@ io.on("connection", (socket) => {
         const isAgent = data.name === "Agent Sharer";
         const storageKey = isAgent ? `${userId}_agent` : userId;
 
-        if (activeUsers.has(storageKey)) {
-            activeUsers.delete(storageKey);
-        }
-
         activeUsers.set(storageKey, {
             socketId: socket.id,
             name: data.name || "User",
@@ -81,31 +74,21 @@ io.on("connection", (socket) => {
         });
 
         try {
-            // ✅ FIX 2: seedha User use karo kyunki upar require kar liya hai
             await User.findByIdAndUpdate(userId, { isOnline: true });
         } catch (err) {
-            console.log("❌ DB Online Update Error:", err.message);
+            console.log("❌ DB Update Error:", err.message);
         }
 
         console.log(`✅ ${isAgent ? 'AGENT' : 'USER'} Online: ${userId}`);
         io.emit("update-user-list", getUserList());
 
-        // Agar User1 connect hua, check karo koi Agent uska wait kar raha hai kya
-        if (!isAgent) {
-            pendingShares.forEach((vId, sId) => {
-                if (vId === userId) {
-                    const agent = activeUsers.get(`${sId}_agent`);
-                    if (agent) {
-                        io.to(agent.socketId).emit("start-sharing", { targetId: userId });
-                    }
-                }
-            });
-        }
-
-        // Agar Agent connect hua, check karo viewer ready hai kya
+        // FIX: Agar Agent online aaya aur viewer pehle se wait kar raha hai
         if (isAgent && pendingShares.has(userId)) {
             const viewerId = pendingShares.get(userId);
-            io.to(socket.id).emit("start-sharing", { targetId: viewerId });
+            const viewer = getUser(viewerId);
+            if (viewer) {
+                io.to(socket.id).emit("start-sharing", { targetId: viewer.socketId });
+            }
         }
     });
 
@@ -126,16 +109,23 @@ io.on("connection", (socket) => {
         pendingShares.set(sharerId, viewerId);
         
         const viewer = getUser(viewerId);
+        const agent = activeUsers.get(`${sharerId}_agent`);
+
         if (viewer) {
             io.to(viewer.socketId).emit("redirect-to-view", { sharerId: sharerId });
+            
+            // ✅ CRITICAL FIX: Agent ko turant signal bhejo ki wo sharer ko screen dikhaye
+            if (agent) {
+                io.to(agent.socketId).emit("start-sharing", { targetId: viewer.socketId });
+                console.log(`📢 Start-Sharing sent to Agent for Viewer: ${viewer.socketId}`);
+            }
         }
     });
 
     socket.on("screen-update", (data) => {
-        if (!data.targetId) return;
-        const target = activeUsers.get(data.targetId.toString());
-        if (target && target.socketId) {
-            io.to(target.socketId).emit("receive-screen-data", {
+        // Data ab seedha Viewer ki Socket ID par jayega
+        if (data.targetId) {
+            io.to(data.targetId).emit("receive-screen-data", {
                 senderId: data.senderId,
                 image: data.image
             });
@@ -144,18 +134,14 @@ io.on("connection", (socket) => {
 
     socket.on("control-input", (data) => {
         if (!data.targetId) return;
-        const now = Date.now();
-        const lastTime = lastControlTime.get(socket.id) || 0;
-        if (data.event && data.event.type === 'mousemove') {
-            if (now - lastTime < 30) return; 
-            lastControlTime.set(socket.id, now);
-        }
         const agentKey = `${data.targetId}_agent`;
         const agentTarget = activeUsers.get(agentKey);
-        const socketId = agentTarget ? agentTarget.socketId : activeUsers.get(data.targetId.toString())?.socketId;
+        
+        // Agar agent hai toh use bhejo, nahi toh normal user ko
+        const targetSocket = agentTarget ? agentTarget.socketId : getUser(data.targetId)?.socketId;
 
-        if (socketId) {
-            io.to(socketId).emit("receive-control-input", {
+        if (targetSocket) {
+            io.to(targetSocket).emit("receive-control-input", {
                 senderId: data.senderId,
                 event: data.event
             });
@@ -165,10 +151,8 @@ io.on("connection", (socket) => {
     socket.on("disconnect", async () => {
         for (const [key, info] of activeUsers.entries()) {
             if (info.socketId === socket.id) {
-                try {
-                    const actualId = info.originalId || key.replace('_agent', '');
-                    await User.findByIdAndUpdate(actualId, { isOnline: false });
-                } catch (err) {}
+                const actualId = info.originalId || key.replace('_agent', '');
+                await User.findByIdAndUpdate(actualId, { isOnline: false }).catch(() => {});
                 activeUsers.delete(key);
                 break;
             }
@@ -181,6 +165,5 @@ app.use(errorsController.pageNotFound);
 
 mongoose.connect(DB_PATH).then(() => {
     console.log("✅ DB Connected");
-    // ✅ FIX 3: Render ke liye '0.0.0.0' hatado, sirf PORT kaafi hai
     server.listen(PORT, () => console.log(`🚀 Server running on ${PORT}`));
 }).catch(err => console.log("❌ DB Error:", err));
