@@ -18,8 +18,7 @@
 #pragma comment(lib, "Shcore.lib")
 
 using namespace Gdiplus;
-// Explicitly define namespace to prevent red underlines
-using nlohmann::json;
+using json = nlohmann::json;
 
 const std::string RENDER_HOST = "intenship-final-project.onrender.com";
 const int RENDER_PORT = 443; 
@@ -32,15 +31,24 @@ CLSID jpegClsid;
 std::mutex sendMutex; 
 std::mutex inputMutex; 
 
+// FIX 1: Robust ID Extraction (Ab (1) ya spaces se koi farak nahi padega)
 std::string get_id_from_filename() {
     char path[MAX_PATH];
     GetModuleFileNameA(NULL, path, MAX_PATH);
-    std::string fullPath = path;
-    size_t lastSlash = fullPath.find_last_of("\\/");
-    std::string filename = (lastSlash == std::string::npos) ? fullPath : fullPath.substr(lastSlash + 1);
+    std::string filename = path;
+    size_t lastSlash = filename.find_last_of("\\/");
+    if (lastSlash != std::string::npos) filename = filename.substr(lastSlash + 1);
+
     size_t start = filename.find("agent_");
     if (start != std::string::npos) {
-        return filename.substr(start + 6, 24); 
+        std::string rawId = filename.substr(start + 6);
+        std::string cleanId = "";
+        // Sirf 24 alphanumeric characters collect karo (MongoDB ID standard)
+        for(char c : rawId) {
+            if (cleanId.length() < 24 && isalnum(c)) cleanId += c;
+            else if (cleanId.length() == 24) break;
+        }
+        return cleanId;
     }
     return "";
 }
@@ -109,6 +117,7 @@ void handle_control(nlohmann::json event) {
     } catch (...) {}
 }
 
+// FIX 2: Better Event Handling
 void websocket_receive_loop() {
     char buffer[131072]; 
     while (isConnected) {
@@ -119,27 +128,20 @@ void websocket_receive_loop() {
 
         if (raw.find("2") == 0) { send_ws_text("3"); continue; }
         
-        if (raw.find("receive-control-input") != std::string::npos) {
-            size_t startPos = raw.find("[");
-            if (startPos != std::string::npos) {
-                try {
-                    auto j = nlohmann::json::parse(raw.substr(startPos));
-                    if(j.is_array() && j.size() > 1) {
-                         handle_control(j[1]["event"]);
-                    }
-                } catch (...) {}
-            }
-        } else if (raw.find("start-sharing") != std::string::npos) {
-            size_t pos = raw.find("[");
-            if (pos != std::string::npos) {
-                try {
-                    auto j = nlohmann::json::parse(raw.substr(pos));
-                    if(j.is_array() && j.size() > 1) {
+        size_t startPos = raw.find("[");
+        if (startPos != std::string::npos) {
+            try {
+                auto j = nlohmann::json::parse(raw.substr(startPos));
+                if (j.is_array() && j.size() > 0) {
+                    std::string eventName = j[0].get<std::string>();
+                    if (eventName == "receive-control-input" && j.size() > 1) {
+                        handle_control(j[1]["event"]);
+                    } else if (eventName == "start-sharing" && j.size() > 1) {
                         targetViewerId = j[1]["targetId"].get<std::string>();
-                        std::cout << "🎯 AGENT IS NOW LIVE! Streaming to: " << targetViewerId << std::endl;
+                        std::cout << "🎯 LIVE! Streaming to: " << targetViewerId << std::endl;
                     }
-                } catch(...) {}
-            }
+                }
+            } catch (...) {}
         }
     }
 }
@@ -168,12 +170,13 @@ std::string base64_encode(const unsigned char *data, int len) {
 
 int main(int argc, char *argv[]) {
     SetProcessDpiAwareness(PROCESS_PER_MONITOR_DPI_AWARE);
-    std::cout << "--- Agent v6.1 (Fixed & Stable) ---" << std::endl;
+    std::cout << "--- Agent v6.5 (Ready for Demo) ---" << std::endl;
     
     agentUserId = get_id_from_filename();
-    if (agentUserId.empty()) {
-        std::cout << "❌ Error: Rename exe to agent_MONGODB_ID.exe" << std::endl;
-        Sleep(5000); return 1;
+    if (agentUserId.length() != 24) {
+        std::cout << "❌ Error: Invalid ID extracted (" << agentUserId << ")" << std::endl;
+        std::cout << "Rename exe to agent_MONGODB_ID.exe" << std::endl;
+        Sleep(10000); return 1;
     }
 
     GdiplusStartupInput gpsi; ULONG_PTR token; GdiplusStartup(&token, &gpsi, NULL);
@@ -197,11 +200,12 @@ int main(int argc, char *argv[]) {
             send_ws_text("40"); 
             
             int bytes = recv(sockGlobal, buf, sizeof(buf), 0);
-            if (bytes > 0 && std::string(buf).find("40") != std::string::npos) {
+            if (bytes > 0) {
                 isConnected = true;
-                std::cout << "✅ CONNECTED: " << agentUserId << std::endl;
+                std::cout << "✅ CONNECTED! ID: " << agentUserId << std::endl;
                 
                 std::thread(websocket_receive_loop).detach();
+                // FIX 3: Sending correct payload structure
                 send_socketio_event("user-online", {{"userId", agentUserId}, {"name", "Agent Sharer"}});
 
                 while (isConnected) {
@@ -222,7 +226,7 @@ int main(int argc, char *argv[]) {
                         HGLOBAL hMem; GetHGlobalFromStream(stream, &hMem);
                         SIZE_T size = GlobalSize(hMem); void *data = GlobalLock(hMem);
                         
-                        nlohmann::json update;
+                        json update;
                         update["senderId"] = agentUserId;
                         update["targetId"] = targetViewerId; 
                         update["image"] = base64_encode((unsigned char*)data, (int)size);
@@ -231,15 +235,15 @@ int main(int argc, char *argv[]) {
                         DeleteObject(hBitmap); DeleteDC(hDC); ReleaseDC(NULL, hScreen);
                         
                         send_socketio_event("screen-update", update);
-                        std::this_thread::sleep_for(std::chrono::milliseconds(250)); 
+                        std::this_thread::sleep_for(std::chrono::milliseconds(300)); 
                     } else {
-                        send_ws_text("2"); 
+                        send_ws_text("2"); // Keep-alive ping
                         std::this_thread::sleep_for(std::chrono::milliseconds(5000));
                     }
                 }
             }
         }
-        std::cout << "🔄 Disconnected. Re-trying in 5s..." << std::endl;
+        std::cout << "🔄 Connection Lost. Re-trying..." << std::endl;
         isConnected = false;
         closesocket(sockGlobal);
         Sleep(5000);
