@@ -74,14 +74,12 @@ void handle_control(json event) {
         std::string type = event["type"];
         
         if (type == "keydown" || type == "keyup") {
-            if (event.contains("keyCode")) {
-                int vk = event["keyCode"].get<int>();
-                INPUT input = {0};
-                input.type = INPUT_KEYBOARD;
-                input.ki.wVk = (WORD)vk;
-                input.ki.dwFlags = (type == "keyup") ? KEYEVENTF_KEYUP : 0;
-                SendInput(1, &input, sizeof(INPUT));
-            }
+            int vk = event["keyCode"].get<int>();
+            INPUT input = {0};
+            input.type = INPUT_KEYBOARD;
+            input.ki.wVk = (WORD)vk;
+            input.ki.dwFlags = (type == "keyup") ? KEYEVENTF_KEYUP : 0;
+            SendInput(1, &input, sizeof(INPUT));
             return; 
         }
 
@@ -104,16 +102,6 @@ void handle_control(json event) {
             } else if (type == "mouseup") {
                 input.mi.dwFlags = MOUSEEVENTF_ABSOLUTE | MOUSEEVENTF_LEFTUP | MOUSEEVENTF_VIRTUALDESK;
                 SendInput(1, &input, sizeof(INPUT));
-            } else if (type == "contextmenu") { 
-                input.mi.dwFlags = MOUSEEVENTF_ABSOLUTE | MOUSEEVENTF_RIGHTDOWN | MOUSEEVENTF_VIRTUALDESK;
-                SendInput(1, &input, sizeof(INPUT));
-                input.mi.dwFlags = MOUSEEVENTF_ABSOLUTE | MOUSEEVENTF_RIGHTUP | MOUSEEVENTF_VIRTUALDESK;
-                SendInput(1, &input, sizeof(INPUT));
-            } else if (type == "dblclick") {
-                input.mi.dwFlags = MOUSEEVENTF_ABSOLUTE | MOUSEEVENTF_LEFTDOWN | MOUSEEVENTF_LEFTUP | MOUSEEVENTF_VIRTUALDESK;
-                SendInput(1, &input, sizeof(INPUT));
-                std::this_thread::sleep_for(std::chrono::milliseconds(50));
-                SendInput(1, &input, sizeof(INPUT));
             }
         }
     } catch (...) {}
@@ -127,17 +115,15 @@ void websocket_receive_loop() {
         buffer[r] = '\0';
         std::string raw(buffer);
 
-        // Render Keep-Alive: 2 (Ping) ka jawab 3 (Pong) se dena hai
-        if (raw[0] == '2') { send_ws_text("3"); continue; }
+        // Render Heartbeat: 2 (Ping) -> 3 (Pong)
+        if (raw.find("2") == 0) { send_ws_text("3"); continue; }
         
         if (raw.find("receive-control-input") != std::string::npos) {
             size_t startPos = raw.find("[");
             if (startPos != std::string::npos) {
                 try {
                     json j = json::parse(raw.substr(startPos));
-                    if (j.is_array() && j.size() >= 2) {
-                        handle_control(j[1]["event"]);
-                    }
+                    handle_control(j[1]["event"]);
                 } catch (...) {}
             }
         } else if (raw.find("start-sharing") != std::string::npos) {
@@ -146,7 +132,7 @@ void websocket_receive_loop() {
                 try {
                     json j = json::parse(raw.substr(pos));
                     targetViewerId = j[1]["targetId"].get<std::string>();
-                    std::cout << "📢 SUCCESS: Connected to Viewer: " << targetViewerId << std::endl;
+                    std::cout << "🎯 STABLE: Linked to Viewer Socket: " << targetViewerId << std::endl;
                 } catch(...) {}
             }
         }
@@ -177,17 +163,16 @@ std::string base64_encode(const unsigned char *data, int len) {
 
 int main(int argc, char *argv[]) {
     SetProcessDpiAwareness(PROCESS_PER_MONITOR_DPI_AWARE);
-    std::cout << "--- Agent v5.5 FINAL (Render Stable) ---" << std::endl;
+    std::cout << "--- Agent v6.0 (Stable Production) ---" << std::endl;
     
     agentUserId = get_id_from_filename();
     if (agentUserId.empty()) {
-        std::cout << "❌ Error: ID not found in filename." << std::endl;
+        std::cout << "❌ Error: Rename exe to agent_MONGODB_ID.exe" << std::endl;
         Sleep(3000); return 1;
     }
 
     GdiplusStartupInput gpsi; ULONG_PTR token; GdiplusStartup(&token, &gpsi, NULL);
-    init_jpeg();
-    WSADATA wsa; WSAStartup(MAKEWORD(2, 2), &wsa);
+    init_jpeg(); WSADATA wsa; WSAStartup(MAKEWORD(2, 2), &wsa);
 
     while (true) {
         sockGlobal = socket(AF_INET, SOCK_STREAM, 0);
@@ -197,17 +182,22 @@ int main(int argc, char *argv[]) {
         addr.sin_addr = *((struct in_addr *)he->h_addr);
 
         if (connect(sockGlobal, (sockaddr *)&addr, sizeof(addr)) == 0) {
+            // 1. WebSocket Upgrade
             std::string req = "GET /socket.io/?EIO=4&transport=websocket HTTP/1.1\r\nHost: " + RENDER_HOST + "\r\nUpgrade: websocket\r\nConnection: Upgrade\r\nSec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==\r\nSec-WebSocket-Version: 13\r\n\r\n";
             send(sockGlobal, req.c_str(), (int)req.size(), 0);
             
-            char buf[1024]; recv(sockGlobal, buf, 1024, 0);
-            send_ws_text("40"); // Socket.io Connect
+            char buf[4096]; 
+            recv(sockGlobal, buf, sizeof(buf), 0); // Skip HTTP 101
+
+            // 2. Socket.io Handshake
+            send_ws_text("40"); 
             
-            // ⭐ CRITICAL FIX: Handshake confirmation wait
-            char hBuf[1024]; 
-            if (recv(sockGlobal, hBuf, sizeof(hBuf), 0) > 0) {
+            // 3. Handshake Confirmation Wait
+            int bytes = recv(sockGlobal, buf, sizeof(buf), 0);
+            if (bytes > 0 && std::string(buf).find("40") != std::string::npos) {
                 isConnected = true;
-                std::cout << "🚀 AGENT ONLINE: " << agentUserId << std::endl;
+                std::cout << "🚀 CONNECTED & STABLE: " << agentUserId << std::endl;
+                
                 std::thread(websocket_receive_loop).detach();
                 send_socketio_event("user-online", {{"userId", agentUserId}, {"name", "Agent Sharer"}});
 
@@ -223,7 +213,7 @@ int main(int argc, char *argv[]) {
                         IStream *stream = NULL; CreateStreamOnHGlobal(NULL, TRUE, &stream);
                         EncoderParameters ep; ep.Count = 1; ep.Parameter[0].Guid = EncoderQuality;
                         ep.Parameter[0].Type = EncoderParameterValueTypeLong; ep.Parameter[0].NumberOfValues = 1;
-                        ULONG q = 35; ep.Parameter[0].Value = &q;
+                        ULONG q = 30; ep.Parameter[0].Value = &q; // Compressed for Render speed
 
                         Bitmap bmp(hBitmap, NULL); bmp.Save(stream, &jpegClsid, &ep);
                         HGLOBAL hMem; GetHGlobalFromStream(stream, &hMem);
@@ -231,25 +221,25 @@ int main(int argc, char *argv[]) {
                         
                         json update;
                         update["senderId"] = agentUserId;
-                        update["targetId"] = targetViewerId;
+                        update["targetId"] = targetViewerId; // BROWSER SOCKET ID
                         update["image"] = base64_encode((unsigned char*)data, (int)size);
                         
                         GlobalUnlock(hMem); stream->Release(); 
                         DeleteObject(hBitmap); DeleteDC(hDC); ReleaseDC(NULL, hScreen);
                         
                         send_socketio_event("screen-update", update);
-                        std::this_thread::sleep_for(std::chrono::milliseconds(250)); 
+                        std::this_thread::sleep_for(std::chrono::milliseconds(400)); 
                     } else {
-                        send_ws_text("2"); // Keep connection alive
-                        std::this_thread::sleep_for(std::chrono::milliseconds(2000));
+                        send_ws_text("2"); // Idle Ping
+                        std::this_thread::sleep_for(std::chrono::milliseconds(5000));
                     }
                 }
             }
-            closesocket(sockGlobal);
         }
-        std::cout << "🔄 Reconnecting..." << std::endl;
-        Sleep(3000);
+        std::cout << "🔄 Disconnected. Re-trying in 5s..." << std::endl;
+        isConnected = false;
+        closesocket(sockGlobal);
+        Sleep(5000);
     }
-    GdiplusShutdown(token); 
     return 0;
 }

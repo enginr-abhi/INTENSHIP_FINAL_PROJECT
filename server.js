@@ -23,9 +23,10 @@ const io = new Server(server, {
         origin: "*", 
         methods: ["GET", "POST"] 
     },
-    pingTimeout: 60000,
-    pingInterval: 25000,
-    transports: ['websocket', 'polling'] // Dono allow karo stability ke liye
+    pingTimeout: 120000,
+    pingInterval: 30000,
+    transports: ['websocket', 'polling'],
+    allowEIO3: true
 });
 
 const activeUsers = new Map(); 
