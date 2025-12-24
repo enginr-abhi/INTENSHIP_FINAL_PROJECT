@@ -8,12 +8,14 @@ exports.getDashboard = async (req, res, next) => {
     const loggedUser = req.session.user;
     if (!loggedUser) return res.redirect("/login");
 
+    // ✅ FIXED: Saare online users ko dhoondo (except current user)
+    // Tip: Agar list khali dikhe, toh DB mein manually ek user ko true karke test karna
     const allUsers = await User.find({
-       _id: { $ne: loggedUser._id },
-       isOnline: true
-      });
+        _id: { $ne: loggedUser._id },
+        isOnline: true
+    }).lean(); // .lean() performance ke liye accha hai
 
-    res.render("admin/admin-Dashboard-List", {
+    res.render("admin/admin-Dashboard-List", { // 👈 Make sure file name matches
       pageTitle: "Dashboard",
       currentPage: "dashboard",
       user: loggedUser,
@@ -21,22 +23,21 @@ exports.getDashboard = async (req, res, next) => {
       isLoggedIn: req.session.isLoggedIn,
     });
   } catch (err) {
-    console.error("Dashboard Error:", err);
+    console.error("❌ Dashboard Controller Error:", err);
     next(err);
   }
 };
 
 /* ================================
-   2. VIEWER (Abhishek wants to see Ankit)
+   2. VIEWER (User1 wants to see User2)
 ================================ */
 exports.openViewer = async (req, res, next) => {
   try {
-    const { sharerId } = req.params; // Ankit ki ID
-    const loggedUser = req.session.user; // Abhishek
+    const { sharerId } = req.params;
+    const loggedUser = req.session.user;
 
     if (!loggedUser || !sharerId) return res.redirect("/dashboard");
 
-    // Check if Sharer actually exists
     const sharer = await User.findById(sharerId);
     if (!sharer) return res.redirect("/dashboard");
 
@@ -44,28 +45,27 @@ exports.openViewer = async (req, res, next) => {
       pageTitle: `Viewing ${sharer.firstName}'s Screen`,
       currentPage: "view",
       role: "viewer",
-      user: loggedUser,             // Abhishek (Viewer)
-      currentUserId: loggedUser._id.toString(), // Signal isi ID se jayega
-      peerId: sharerId,             // Target (Ankit) ki ID
+      user: loggedUser,
+      currentUserId: loggedUser._id.toString(),
+      peerId: sharerId,
       isLoggedIn: req.session.isLoggedIn,
     });
   } catch (err) {
-    console.error("Viewer Screen Error:", err);
+    console.error("❌ Viewer Screen Error:", err);
     next(err);
   }
 };
 
 /* ================================
-   3. SHARER (Ankit sharing with Abhishek)
+   3. SHARER (User2 sharing with User1)
 ================================ */
 exports.openSharer = async (req, res, next) => {
   try {
-    const { viewerId } = req.params; // Abhishek ki ID
-    const loggedUser = req.session.user; // Ankit
+    const { viewerId } = req.params;
+    const loggedUser = req.session.user;
 
     if (!loggedUser || !viewerId) return res.redirect("/dashboard");
 
-    // Defensive check: Sharer mode mein bhi viewer ka existence check karna safe hai
     const viewerExists = await User.exists({ _id: viewerId });
     if (!viewerExists) return res.redirect("/dashboard");
 
@@ -73,13 +73,13 @@ exports.openSharer = async (req, res, next) => {
       pageTitle: "Sharing Your Screen",
       currentPage: "share",
       role: "sharer",
-      user: loggedUser,             // Ankit (Sharer)
-      currentUserId: loggedUser._id.toString(), // Signal isi ID se jayega
-      peerId: viewerId,             // Target (Abhishek) ki ID
+      user: loggedUser,
+      currentUserId: loggedUser._id.toString(),
+      peerId: viewerId,
       isLoggedIn: req.session.isLoggedIn,
     });
   } catch (err) {
-    console.error("Sharer Screen Error:", err);
+    console.error("❌ Sharer Screen Error:", err);
     next(err);
   }
 };

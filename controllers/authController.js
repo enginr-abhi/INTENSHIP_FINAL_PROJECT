@@ -2,13 +2,15 @@ const { check, validationResult } = require("express-validator");
 const User = require("../models/user");
 const bcrypt = require("bcryptjs");
 
+// --- GET METHODS ---
+
 exports.getLogin = (req, res, next) => {
   res.render("auth/login", {
     pageTitle: "Login",
     currentPage: "login",
     isLoggedIn: false,
     errors: [],
-    oldInput: {email: ""},
+    oldInput: { email: "" },
     user: {},
   });
 };
@@ -19,15 +21,17 @@ exports.getSignup = (req, res, next) => {
     currentPage: "signup",
     isLoggedIn: false,
     errors: [],
-    oldInput: {firstName: "", lastName: "", email: "", userType: ""},
+    oldInput: { firstName: "", lastName: "", email: "", userType: "" },
     user: {},
   });
 };
 
+// --- POST METHODS ---
+
 exports.postSignup = [
   check("firstName")
     .trim()
-    .isLength({min: 2})
+    .isLength({ min: 2 })
     .withMessage("First Name should be atleast 2 characters long")
     .matches(/^[A-Za-z\s]+$/)
     .withMessage("First Name should contain only alphabets"),
@@ -42,7 +46,7 @@ exports.postSignup = [
     .normalizeEmail(),
 
   check("password")
-    .isLength({min: 8})
+    .isLength({ min: 8 })
     .withMessage("Password should be atleast 8 characters long")
     .matches(/[A-Z]/)
     .withMessage("Password should contain atleast one uppercase letter")
@@ -56,7 +60,7 @@ exports.postSignup = [
 
   check("confirmPassword")
     .trim()
-    .custom((value, {req}) => {
+    .custom((value, { req }) => {
       if (value !== req.body.password) {
         throw new Error("Passwords do not match");
       }
@@ -72,7 +76,7 @@ exports.postSignup = [
   check("terms")
     .notEmpty()
     .withMessage("Please accept the terms and conditions")
-    .custom((value, {req}) => {
+    .custom((value, { req }) => {
       if (value !== "on") {
         throw new Error("Please accept the terms and conditions");
       }
@@ -80,7 +84,7 @@ exports.postSignup = [
     }),
   
   (req, res, next) => {
-    const {firstName, lastName, email, password, userType} = req.body;
+    const { firstName, lastName, email, password, userType } = req.body;
     const errors = validationResult(req);
     if (!errors.isEmpty()) {
       return res.status(422).render("auth/signup", {
@@ -88,14 +92,14 @@ exports.postSignup = [
         currentPage: "signup",
         isLoggedIn: false,
         errors: errors.array().map(err => err.msg),
-        oldInput: {firstName, lastName, email, password, userType},
+        oldInput: { firstName, lastName, email, password, userType },
         user: {},
       });
     }
 
     bcrypt.hash(password, 12)
       .then(hashedPassword => {
-        const user = new User({firstName, lastName, email, password: hashedPassword, userType});
+        const user = new User({ firstName, lastName, email, password: hashedPassword, userType });
         return user.save();
       })
       .then(() => {
@@ -107,7 +111,7 @@ exports.postSignup = [
           currentPage: "signup",
           isLoggedIn: false,
           errors: [err.message],
-          oldInput: {firstName, lastName, email, userType},
+          oldInput: { firstName, lastName, email, userType },
           user: {},
         });
       });
@@ -115,50 +119,69 @@ exports.postSignup = [
 ];
 
 exports.postLogin = async (req, res, next) => {
-  const {email, password} = req.body;
-  const user = await User.findOne({email});
-  if (!user) {
-    return res.status(422).render("auth/login", {
-      pageTitle: "Login",
-      currentPage: "login",
-      isLoggedIn: false,
-      errors: ["User does not exist"],
-      oldInput: {email},
-      user: {},
+  const { email, password } = req.body;
+  
+  try {
+    const user = await User.findOne({ email });
+    if (!user) {
+      return res.status(422).render("auth/login", {
+        pageTitle: "Login",
+        currentPage: "login",
+        isLoggedIn: false,
+        errors: ["User does not exist"],
+        oldInput: { email },
+        user: {},
+      });
+    }
+
+    const isMatch = await bcrypt.compare(password, user.password);
+    if (!isMatch) {
+      return res.status(422).render("auth/login", {
+        pageTitle: "Login",
+        currentPage: "login",
+        isLoggedIn: false,
+        errors: ["Invalid Password"],
+        oldInput: { email },
+        user: {},
+      });
+    }
+
+    // ✅ FIXED: Database mein user ko Online mark karo login hote hi
+    user.isOnline = true;
+    await user.save();
+
+    req.session.isLoggedIn = true;
+    req.session.user = {
+      _id: user._id.toString(),
+      firstName: user.firstName,
+      lastName: user.lastName,
+      email: user.email,
+      userType: user.userType
+    };
+
+    // Save session and redirect
+    req.session.save(err => {
+      if (err) console.log(err);
+      res.redirect("/dashboard");
     });
+  } catch (err) {
+    console.log("❌ Login Error:", err);
+    res.redirect("/login");
   }
-
-  const isMatch = await bcrypt.compare(password, user.password);
-  if (!isMatch) {
-    return res.status(422).render("auth/login", {
-      pageTitle: "Login",
-      currentPage: "login",
-      isLoggedIn: false,
-      errors: ["Invalid Password"],
-      oldInput: {email},
-      user: {},
-    });
-  }
-
-  // ✅ Fix: store only plain JS object in session
-  req.session.isLoggedIn = true;
-  req.session.user = {
-    _id: user._id.toString(),
-    firstName: user.firstName,
-    lastName: user.lastName,
-    email: user.email,
-    userType: user.userType
-  };
-
-  // Save session and redirect
-  req.session.save(err => {
-    if (err) console.log(err);
-    res.redirect("/dashboard");
-  });
 };
 
-exports.postLogout = (req, res, next) => {
-  req.session.destroy(() => {
-    res.redirect("/login");
-  });
+exports.postLogout = async (req, res, next) => {
+  try {
+    if (req.session.user) {
+      // ✅ FIXED: Logout hote hi DB mein Offline mark karo
+      await User.findByIdAndUpdate(req.session.user._id, { isOnline: false });
+    }
+    req.session.destroy((err) => {
+      if (err) console.log("❌ Logout Error:", err);
+      res.redirect("/login");
+    });
+  } catch (err) {
+    console.log(err);
+    res.redirect("/");
+  }
 };

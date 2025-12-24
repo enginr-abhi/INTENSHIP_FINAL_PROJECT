@@ -6,6 +6,9 @@ const MongoDBStore = require("connect-mongodb-session")(session);
 const { Server } = require("socket.io");
 const mongoose = require("mongoose");
 
+// ✅ FIX 1: Model ko yahan require kar lo taaki 'User' hamesha registered rahe
+const User = require("./models/user"); 
+
 const homeRouter = require("./routes/homeRouter");
 const authRouter = require("./routes/authRouter");
 const dashboardRouter = require("./routes/dashboardRouter");
@@ -24,13 +27,11 @@ const io = new Server(server, {
 
 const activeUsers = new Map(); 
 const pendingShares = new Map(); 
-
-// --- THROTTLING LOGIC START ---
 const lastControlTime = new Map();
-// --- THROTTLING LOGIC END ---
 
+// Filter logic: Dashboard par wahi dikhenge jo login hain (Agents nahi)
 const getUserList = () => Array.from(activeUsers)
-    .filter(([_, info]) => !info.isAgent) 
+    .filter(([_, info]) => !info.isAgent)
     .map(([userId, info]) => ({ 
         userId: info.originalId || userId, 
         name: info.name 
@@ -62,12 +63,10 @@ app.use(dashboardRouter);
 io.on("connection", (socket) => {
     console.log("🔌 New Connection:", socket.id);
 
-    // --- UPDATED: user-online with DB persistence ---
     socket.on("user-online", async (data) => { 
         if (!data.userId) return;
         const userId = data.userId.toString();
         const isAgent = data.name === "Agent Sharer";
-
         const storageKey = isAgent ? `${userId}_agent` : userId;
 
         if (activeUsers.has(storageKey)) {
@@ -81,9 +80,8 @@ io.on("connection", (socket) => {
             originalId: userId 
         });
 
-        // Update DB Status
         try {
-            const User = mongoose.model('User');
+            // ✅ FIX 2: seedha User use karo kyunki upar require kar liya hai
             await User.findByIdAndUpdate(userId, { isOnline: true });
         } catch (err) {
             console.log("❌ DB Online Update Error:", err.message);
@@ -92,35 +90,33 @@ io.on("connection", (socket) => {
         console.log(`✅ ${isAgent ? 'AGENT' : 'USER'} Online: ${userId}`);
         io.emit("update-user-list", getUserList());
 
+        // Agar User1 connect hua, check karo koi Agent uska wait kar raha hai kya
         if (!isAgent) {
             pendingShares.forEach((vId, sId) => {
                 if (vId === userId) {
                     const agent = activeUsers.get(`${sId}_agent`);
                     if (agent) {
                         io.to(agent.socketId).emit("start-sharing", { targetId: userId });
-                        console.log(`🚀 Viewer (Abhishek) Re-connected. Telling Agent (Ankit) to start!`);
                     }
                 }
             });
         }
 
+        // Agar Agent connect hua, check karo viewer ready hai kya
         if (isAgent && pendingShares.has(userId)) {
             const viewerId = pendingShares.get(userId);
             io.to(socket.id).emit("start-sharing", { targetId: viewerId });
-            console.log(`🎯 Agent (Ankit) matched with Viewer (Abhishek): ${viewerId}`);
         }
     });
 
     socket.on("send-share-request", (data) => {
         const targetId = data.targetId.toString();
         const target = getUser(targetId);
-        
         if (target && target.socketId) {
             io.to(target.socketId).emit("incoming-request", { 
                 senderId: data.senderId, 
                 senderName: data.senderName 
             });
-            console.log(`📩 Request: ${data.senderName} -> ${targetId}`);
         }
     });
 
@@ -133,7 +129,6 @@ io.on("connection", (socket) => {
         if (viewer) {
             io.to(viewer.socketId).emit("redirect-to-view", { sharerId: sharerId });
         }
-        console.log(`🤝 Accepted: Sharer ${sharerId} -> Viewer ${viewerId}`);
     });
 
     socket.on("screen-update", (data) => {
@@ -149,19 +144,14 @@ io.on("connection", (socket) => {
 
     socket.on("control-input", (data) => {
         if (!data.targetId) return;
-
         const now = Date.now();
         const lastTime = lastControlTime.get(socket.id) || 0;
-        
         if (data.event && data.event.type === 'mousemove') {
             if (now - lastTime < 30) return; 
             lastControlTime.set(socket.id, now);
         }
-
-        console.log("📥 Control received on Server:", data.event);
         const agentKey = `${data.targetId}_agent`;
         const agentTarget = activeUsers.get(agentKey);
-        
         const socketId = agentTarget ? agentTarget.socketId : activeUsers.get(data.targetId.toString())?.socketId;
 
         if (socketId) {
@@ -172,23 +162,14 @@ io.on("connection", (socket) => {
         }
     });
 
-    // --- UPDATED: disconnect with DB persistence ---
     socket.on("disconnect", async () => {
         for (const [key, info] of activeUsers.entries()) {
             if (info.socketId === socket.id) {
-                console.log("❌ Offline:", key);
-                
                 try {
-                    const User = mongoose.model('User');
                     const actualId = info.originalId || key.replace('_agent', '');
                     await User.findByIdAndUpdate(actualId, { isOnline: false });
-                    console.log(`📡 DB Sync: User ${actualId} marked Offline`);
-                } catch (err) {
-                    console.log("❌ DB Offline Update Error:", err.message);
-                }
-
+                } catch (err) {}
                 activeUsers.delete(key);
-                lastControlTime.delete(socket.id); 
                 break;
             }
         }
@@ -200,5 +181,6 @@ app.use(errorsController.pageNotFound);
 
 mongoose.connect(DB_PATH).then(() => {
     console.log("✅ DB Connected");
-    server.listen(PORT, '0.0.0.0', () => console.log(`🚀 Server: http://0.0.0.0:${PORT}`));
+    // ✅ FIX 3: Render ke liye '0.0.0.0' hatado, sirf PORT kaafi hai
+    server.listen(PORT, () => console.log(`🚀 Server running on ${PORT}`));
 }).catch(err => console.log("❌ DB Error:", err));

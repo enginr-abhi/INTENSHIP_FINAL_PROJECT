@@ -1,43 +1,49 @@
-// public/js/socket.js - FINAL FIXED (Minor Improvement)
+// public/js/socket.js - FINAL FIXED (Production Ready)
 
 (function () {
+    // Prevent multiple connections
     if (window.socket) return;
 
     const currentUserIdElement = document.getElementById('current-user-id');
     const currentUserId = currentUserIdElement ? currentUserIdElement.getAttribute('data-user-id') : null; 
-    const userName = currentUserIdElement ? currentUserIdElement.getAttribute('data-user-name') : 'Unknown'; // ✅ Added data-user-name check
+    const userName = currentUserIdElement ? currentUserIdElement.getAttribute('data-user-name') : 'User';
     const userRole = currentUserIdElement ? currentUserIdElement.getAttribute('data-role') : 'unknown';
 
-    window.socket = io("http://localhost:8000", {
+    // ✅ FIXED: String quotation ("") hata di, ab ye sahi current URL lega
+    window.socket = io(window.location.origin, {
         transports: ["websocket"],
         reconnection: true,
+        reconnectionAttempts: 5,
+        reconnectionDelay: 2000,
     });
 
-
     window.socket.on("connect", () => {
-        console.log("🔌 Global socket connected:", window.socket.id);
+        console.log("🔌 Connected to Server Socket:", window.socket.id);
 
         if (currentUserId) {
-
+            // Registering user with the server
             window.socket.emit('user-online', { 
                 userId: currentUserId, 
-                // ✅ Name is sent as required by server.js
-                name: userName, // Using a dedicated name attribute if available, otherwise defaulting.
+                name: userName, 
                 role: userRole
             });
-            console.log(`✅ Sent 'user-online' signal for User ID: ${currentUserId}`);
+            console.log(`✅ Registered Online: ${userName} (${currentUserId})`);
         } else {
-            console.error("❌ User ID not found for Socket registration!");
+            console.warn("⚠️ No currentUserId found during socket connection.");
         }
     });
 
-    window.socket.on("disconnect", () => {
-        console.log("❌ Global socket disconnected");
+    window.socket.on("disconnect", (reason) => {
+        console.log("❌ Socket disconnected. Reason:", reason);
+    });
+
+    window.socket.on("connect_error", (error) => {
+        console.error("🔌 Socket Connection Error:", error);
     });
     
-    // Global variables for easy access in other JS files
+    // Global variables for other scripts to use
     window.CURRENT_USER_ID = currentUserId;
     window.USER_ROLE = userRole;
-    window.USER_NAME = userName; // Added
+    window.USER_NAME = userName;
     
 })();

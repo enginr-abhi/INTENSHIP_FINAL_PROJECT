@@ -9,81 +9,67 @@
 
 <%- include('../partials/nav') %>
 
-<div class="bg-blue-100 text-blue-700 p-3 border-l-4 border-blue-500 mb-5 text-lg font-semibold">
-  Welcome, <%= user.firstName %> <%= user.lastName %> 👋
+<div class="bg-blue-600 text-white p-6 shadow-md mb-6">
+  <div class="max-w-4xl mx-auto flex justify-between items-center">
+    <h1 class="text-2xl font-bold">Welcome, <%= user.firstName %> 👋</h1>
+    <div class="bg-blue-500 px-4 py-2 rounded-lg text-sm">
+      Your ID: <span class="font-mono font-bold"><%= user._id %></span>
+    </div>
+  </div>
 </div>
 
-<!-- (optional) hidden span — harmless -->
+<div class="max-w-4xl mx-auto px-5 mb-6">
+  <div class="bg-white border-l-4 border-blue-500 p-4 rounded shadow-sm">
+    <h3 class="text-blue-800 font-bold mb-1">How to share your screen?</h3>
+    <p class="text-gray-600 text-sm">
+      1. Accept the request from another user. <br>
+      2. <a href="/agent/agent.exe" class="text-blue-600 underline font-bold" download>Download Agent.exe</a> <br>
+      3. Rename it to <span class="bg-gray-200 px-1 font-mono text-red-600">agent_<%= user._id %>.exe</span> and run it.
+    </p>
+  </div>
+</div>
+
 <span id="current-user-id" 
       data-user-id="<%= user._id %>" 
       data-user-name="<%= user.firstName %> <%= user.lastName %>"
       class="hidden"></span>
 
 <div class="p-5 max-w-4xl mx-auto">
-
-  <!-- Incoming Request -->
   <div
     id="incoming-request-container"
-    class="hidden bg-yellow-100 border-l-4 border-yellow-500 text-yellow-700 p-4 mb-5">
+    class="hidden bg-yellow-100 border-l-4 border-yellow-500 text-yellow-700 p-4 mb-5 shadow-lg animate-pulse">
   </div>
-
-  <!-- Viewer Screen
-  <div id="remote-stream-container" class="hidden mb-5">
-    <h3 class="text-xl font-semibold mb-3">Viewing Shared Screen</h3>
-    <img
-      id="remote-video"
-      src=""
-      class="w-full h-auto min-h-[300px]"/>
-      <div id="status-text" class="absolute inset-0 flex items-center justify-center text-white bg-black bg-opacity-50">
-            Connecting to Agent...
-        </div>
-  </div> -->
-
-  <!-- Sharer Screen -->
-  <!-- <div id="local-stream-container" class="hidden mb-5">
-    <h3 class="text-xl font-semibold mb-3">Your Screen (Being Shared)</h3>
-    <video
-      id="local-video"
-       src=""
-      class="w-full h-auto min-h-[300px]" />
-    <button
-      id="stop-sharing-btn"
-      class="mt-2 bg-red-500 text-white px-4 py-2 rounded">
-      Stop Sharing
-    </button>
-  </div> -->
 </div>
 
-<!-- RIGHT SIDEBAR -->
-<div class="fixed top-0 right-0 w-64 h-full bg-[#1E1E2E] text-white shadow-xl z-50 p-5">
-
-  <h2 class="text-xl font-bold flex items-center gap-2 mb-4">
-    <span class="h-3 w-3 bg-green-400 rounded-full"></span>
-    Online Users
+<div class="fixed top-0 right-0 w-80 h-full bg-[#1E1E2E] text-white shadow-2xl z-50 p-5">
+  <h2 class="text-xl font-bold flex items-center gap-2 mb-6 border-b border-gray-700 pb-4">
+    <span class="h-3 w-3 bg-green-400 rounded-full animate-ping"></span>
+    Live Users
   </h2>
 
-  <div
-    id="active-users-list"
-    class="space-y-3 max-h-[calc(100%-80px)] overflow-y-auto">
-
+  <div id="active-users-list" class="space-y-3 overflow-y-auto h-[calc(100%-100px)]">
     <% if (users.length > 0) { %>
       <% users.forEach(u => { %>
-        <div class="bg-[#2A2A3A] p-3 rounded-lg flex justify-between items-center">
-          <span><%= u.firstName %> <%= u.lastName %></span>
+        <div class="bg-[#2A2A3A] p-4 rounded-xl flex flex-col gap-3 border border-gray-700">
+          <div class="flex items-center gap-3">
+            <div class="h-8 w-8 bg-blue-500 rounded-full flex items-center justify-center text-xs font-bold">
+              <%= u.firstName[0] %><%= u.lastName[0] %>
+            </div>
+            <span class="font-medium text-sm"><%= u.firstName %> <%= u.lastName %></span>
+          </div>
 
           <button
-            class="request-btn bg-blue-600 hover:bg-blue-700 text-white px-3 py-1.5 rounded-md text-xs font-medium shadow-md transition-all duration-200"
+            class="request-btn w-full bg-blue-600 hover:bg-blue-700 text-white px-3 py-2 rounded-lg text-xs font-semibold transition-all"
             data-target-id="<%= u._id %>">
-            Request ScreenShare
+            Request Access
           </button>
         </div>
       <% }) %>
     <% } else { %>
-      <div class="text-gray-400 bg-[#2A2A3A] p-3 rounded-lg text-center">
-        No users online
+      <div id="no-users-msg" class="text-gray-400 bg-[#2A2A3A] p-5 rounded-lg text-center text-sm border border-dashed border-gray-600">
+        Waiting for others to join...
       </div>
     <% } %>
-
   </div>
 </div>
 

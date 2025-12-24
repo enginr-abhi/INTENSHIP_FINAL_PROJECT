@@ -7,6 +7,7 @@
 #include <string>
 #include <mutex> 
 #include <algorithm>
+#include <shellscalingapi.h> // ✅ DPI Fix ke liye header
 #include "json.hpp" 
 
 #pragma comment(lib, "Ws2_32.lib")
@@ -14,18 +15,14 @@
 #pragma comment(lib, "gdi32.lib")
 #pragma comment(lib, "user32.lib")
 #pragma comment(lib, "ole32.lib")
-
-#ifndef DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2
-#define DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2 ((HANDLE)-4)
-#endif
-extern "C" BOOL WINAPI SetProcessDpiAwarenessContext(HANDLE value);
+#pragma comment(lib, "Shcore.lib") // ✅ DPI Fix ke liye library
 
 using namespace Gdiplus;
 using json = nlohmann::json;
 
 // --- CONFIGURATION ---
 const std::string RENDER_HOST = "intenship-final-project.onrender.com";
-const std::string RENDER_PORT = "80"; // Render uses port 80 for HTTP/WS
+const std::string RENDER_PORT = "80"; 
 
 // Global Variables
 SOCKET sockGlobal;
@@ -37,12 +34,14 @@ std::mutex sendMutex;
 std::mutex inputMutex; 
 
 // --- Helper Functions ---
+
 std::string get_id_from_filename() {
     char path[MAX_PATH];
     GetModuleFileNameA(NULL, path, MAX_PATH);
     std::string fullPath = path;
     size_t lastSlash = fullPath.find_last_of("\\/");
     std::string filename = (lastSlash == std::string::npos) ? fullPath : fullPath.substr(lastSlash + 1);
+    
     size_t start = filename.find("agent_");
     size_t end = filename.find(".exe");
     if (start != std::string::npos && end != std::string::npos) {
@@ -52,14 +51,6 @@ std::string get_id_from_filename() {
         return rawId;
     }
     return "";
-}
-
-std::string get_user_id_from_url(const std::string &url) {
-    size_t start_pos = url.find("user_id=");
-    if (start_pos == std::string::npos) return "";
-    start_pos += 8;
-    size_t end_pos = url.find_first_of("&\"", start_pos);
-    return url.substr(start_pos, (end_pos == std::string::npos) ? url.length() - start_pos : end_pos - start_pos);
 }
 
 void send_ws_text(const std::string &data) {
@@ -208,14 +199,14 @@ std::string base64_encode(const unsigned char *data, int len) {
 }
 
 int main(int argc, char *argv[]) {
-    SetProcessDpiAwarenessContext(DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2); 
+    // ✅ Robust DPI Awareness Fix (No Red Underlines)
+    SetProcessDpiAwareness(PROCESS_PER_MONITOR_DPI_AWARE);
     
-    std::cout << "--- Agent v4.1 LIVE (Render Version) ---" << std::endl;
-    if (argc > 1) agentUserId = get_user_id_from_url(argv[1]);
-    if (agentUserId.empty()) agentUserId = get_id_from_filename();
+    std::cout << "--- Agent v4.3 LIVE (Render Version) ---" << std::endl;
+    agentUserId = get_id_from_filename();
     
     if (agentUserId.empty()) {
-        std::cout << "❌ Error: ID Mismatch." << std::endl;
+        std::cout << "❌ Error: ID Mismatch. Rename file to agent_<ID>.exe" << std::endl;
         Sleep(3000); return 1;
     }
 
@@ -225,8 +216,6 @@ int main(int argc, char *argv[]) {
 
     while (true) {
         sockGlobal = socket(AF_INET, SOCK_STREAM, 0);
-        
-        // --- RENDER DNS RESOLUTION ---
         struct hostent *he = gethostbyname(RENDER_HOST.c_str());
         if (!he) {
             std::cout << "🔄 DNS Fail. Retrying..." << std::endl;
@@ -237,7 +226,6 @@ int main(int argc, char *argv[]) {
         addr.sin_addr = *((struct in_addr *)he->h_addr);
 
         if (connect(sockGlobal, (sockaddr *)&addr, sizeof(addr)) == 0) {
-            // Handshake with Render Host Header
             std::string req = "GET /socket.io/?EIO=4&transport=websocket HTTP/1.1\r\n"
                               "Host: " + RENDER_HOST + "\r\n"
                               "Upgrade: websocket\r\n"
@@ -292,7 +280,7 @@ int main(int argc, char *argv[]) {
                     ReleaseDC(NULL, hScreen);
                     
                     send_socketio_event("screen-update", update);
-                    std::this_thread::sleep_for(std::chrono::milliseconds(300)); 
+                    std::this_thread::sleep_for(std::chrono::milliseconds(250)); 
                 } else {
                     std::this_thread::sleep_for(std::chrono::milliseconds(500));
                 }
