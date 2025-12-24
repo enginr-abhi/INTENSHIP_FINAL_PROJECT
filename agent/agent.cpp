@@ -1,3 +1,4 @@
+/* This is a C++ file for an agent that connects to a WebSocket server and handles user input and screen capture */
 #include <winsock2.h>
 #include <windows.h>
 #include <gdiplus.h>
