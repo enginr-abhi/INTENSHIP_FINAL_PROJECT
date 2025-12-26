@@ -24,7 +24,7 @@
 
     // 3. Socket Initialize karo
     window.socket = io(window.location.origin, {
-        transports: ["websocket"],
+        transports: ["polling", "websocket"],
         reconnection: true,
         reconnectionAttempts: 10,
         reconnectionDelay: 3000,

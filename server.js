@@ -25,7 +25,7 @@ const io = new Server(server, {
     },
     pingTimeout: 120000,
     pingInterval: 30000,
-    transports: ['websocket'],
+    transports: ['polling', 'websocket'],
     allowEIO3: true,
     connectTimeout: 45000
 });
@@ -70,12 +70,13 @@ io.on("connection", (socket) => {
     socket.on("user-online", async (data) => { 
         if (!data.userId) return;
         const userId = data.userId.toString();
+
         const isAgent = data.name === "Agent Sharer";
         const storageKey = isAgent ? `${userId}_agent` : userId;
 
         activeUsers.set(storageKey, {
             socketId: socket.id,
-            name: data.name || "User",
+            name: data.name || (isAgent ? "Agent Sharer" : "User"),
             isAgent: isAgent,
             originalId: userId 
         });
