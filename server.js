@@ -6,7 +6,7 @@ const MongoDBStore = require("connect-mongodb-session")(session);
 const { Server } = require("socket.io");
 const mongoose = require("mongoose");
 
-const User = require("./models/user"); 
+
 const homeRouter = require("./routes/homeRouter");
 const authRouter = require("./routes/authRouter");
 const dashboardRouter = require("./routes/dashboardRouter");
@@ -23,8 +23,9 @@ const io = new Server(server, {
         origin: "*", 
         methods: ["GET", "POST"] 
     },
-    pingTimeout: 120000,
-    pingInterval: 30000,
+    maxHttpBufferSize: 1e8,
+    pingTimeout: 60000,
+    pingInterval: 25000,
     transports: ['polling', 'websocket'],
     allowEIO3: true,
     connectTimeout: 45000
@@ -70,13 +71,16 @@ io.on("connection", (socket) => {
     socket.on("user-online", async (data) => { 
         if (!data.userId) return;
         const userId = data.userId.toString();
-
         const isAgent = data.name === "Agent Sharer";
         const storageKey = isAgent ? `${userId}_agent` : userId;
 
+        if (activeUsers.has(storageKey)) {
+            activeUsers.delete(storageKey);
+        }
+
         activeUsers.set(storageKey, {
             socketId: socket.id,
-            name: data.name || (isAgent ? "Agent Sharer" : "User"),
+            name: data.name || "User",
             isAgent: isAgent,
             originalId: userId 
         });
@@ -89,13 +93,25 @@ io.on("connection", (socket) => {
 
         console.log(`✅ ${isAgent ? 'AGENT' : 'USER'} Online: ${userId}`);
         io.emit("update-user-list", getUserList());
+       
+        if (!isAgent) {
+            pendingShares.forEach((vId, sId) => {
+                if (vId === userId) {
+                    const agent = activeUsers.get(`${sId}_agent`);
+                    if (agent) {
+                        io.to(agent.socketId).emit("start-sharing", { targetId: userId });
+                        console.log(`🚀 Viewer (Abhishek) Re-connected. Telling Agent (Ankit) to start!`);
+                    }
+                }
+            });
+        }
 
         // FIX: Agar Agent online aaya aur viewer pehle se wait kar raha hai
         if (isAgent && pendingShares.has(userId)) {
             const viewerId = pendingShares.get(userId);;
             // Agent ko Viewer ki MongoDB ID bhejo (Socket ID nahi!)
         io.to(socket.id).emit("start-sharing", { targetId: viewerId });
-        console.log(`🎯 Re-matched Agent ${userId} to Viewer ${viewerId}`);
+        console.log(`🎯 Re-matched Agent ${userId} matched with Viewer ${viewerId}`);
         }
     });
 
@@ -107,6 +123,7 @@ io.on("connection", (socket) => {
                 senderId: data.senderId, 
                 senderName: data.senderName 
             });
+            console.log(`📩 Request: ${data.senderName} -> ${targetId}`);
         }
     });
 
@@ -116,26 +133,17 @@ io.on("connection", (socket) => {
         pendingShares.set(sharerId, viewerId);
         
         const viewer = getUser(viewerId);
-        const agent = activeUsers.get(`${sharerId}_agent`);
-
         if (viewer) {
             io.to(viewer.socketId).emit("redirect-to-view", { sharerId: sharerId });
-            
-            // ✅ CRITICAL FIX: Agent ko turant signal bhejo ki wo sharer ko screen dikhaye
-            // AGENT KO SIGNAL: Target as Viewer's MongoDB ID
-            if (agent) {
-                io.to(agent.socketId).emit("start-sharing", { targetId: viewerId });
-                console.log(`📢 Agent ${sharerId} starting for Viewer ${viewerId}`);
-            }
         }
+        console.log(`🤝 Accepted: Sharer ${sharerId} -> Viewer ${viewerId}`);
     });
 
     socket.on("screen-update", (data) => {
         if (!data.targetId) return;
-        // Data ab seedha Viewer ki Socket ID par jayega
-        const viewer = activeUsers.get(data.targetId.toString());
-        if (viewer && viewer.socketId) {
-            io.to(viewer.socketId).emit("receive-screen-data", {
+        const target = activeUsers.get(data.targetId.toString());
+        if (target && target.socketId) {
+            io.to(target.socketId).emit("receive-screen-data", {
                 senderId: data.senderId,
                 image: data.image
             });
@@ -151,14 +159,16 @@ io.on("connection", (socket) => {
             if (now - lastTime < 30) return;
             lastControlTime.set(socket.id, now);
         }
+        console.log("📥 Control received on Server:", data.event);
         const agentKey = `${data.targetId}_agent`;
         const agentTarget = activeUsers.get(agentKey);
-        
-        // Agar agent hai toh use bhejo, nahi toh normal user ko
-        const targetSocket = agentTarget ? agentTarget.socketId : null;
+        console.log(`🔎 Searching for Agent with key: ${agentKey}`);
+        console.log(`📡 Agent Found: ${agentTarget ? 'YES' : 'NO'}`);
+       
+        const socketId = agentTarget ? agentTarget.socketId : activeUsers.get(data.targetId.toString())?.socketId;
 
-        if (targetSocket) {
-            io.to(targetSocket).emit("receive-control-input", {
+        if (socketId) {
+            io.to(socketId).emit("receive-control-input", {
                 senderId: data.senderId,
                 event: data.event
             });
@@ -168,9 +178,11 @@ io.on("connection", (socket) => {
     socket.on("disconnect", async () => {
         for (const [key, info] of activeUsers.entries()) {
             if (info.socketId === socket.id) {
+                console.log("❌ Offline:", key);
                 const actualId = info.originalId || key.replace('_agent', '');
                 await User.findByIdAndUpdate(actualId, { isOnline: false }).catch(() => {});
                 activeUsers.delete(key);
+                lastControlTime.delete(socket.id);
                 break;
             }
         }
