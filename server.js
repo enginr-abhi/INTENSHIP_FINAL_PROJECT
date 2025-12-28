@@ -5,7 +5,7 @@ const session = require("express-session");
 const MongoDBStore = require("connect-mongodb-session")(session);
 const { Server } = require("socket.io");
 const mongoose = require("mongoose");
-
+const User = require('./models/user'); // Ya jo bhi tera model path hai
 
 const homeRouter = require("./routes/homeRouter");
 const authRouter = require("./routes/authRouter");
