@@ -1,3 +1,4 @@
+/* final*/
 #include <winsock2.h>
 #include <windows.h>
 #include <gdiplus.h>
