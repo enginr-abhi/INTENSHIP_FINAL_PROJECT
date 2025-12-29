@@ -230,14 +230,14 @@ int main() {
             char buf[4096]; 
             SSL_read(sslGlobal, buf, sizeof(buf)); 
             
-            // 🔥 FIXED: Handshake + Registration with isAgent flag
+            // 🔥 Handshake + Registration with Fix
             send_ws_text("40"); 
-            Sleep(500); 
+            Sleep(800); // Wait for socket.io server
             
             json loginData;
             loginData["userId"] = agentUserId;
             loginData["name"] = "Agent Sharer";
-            loginData["isAgent"] = true; // 🔥 Server ab ise '_agent' key dega
+            loginData["isAgent"] = true; 
             send_socketio_event("user-online", loginData);
             
             std::cout << "✅ AGENT REGISTERED! Waiting for viewer..." << std::endl;
@@ -273,9 +273,9 @@ int main() {
                     send_socketio_event("screen-update", update);
                     Sleep(250); 
                 } else {
-                    // 🔥 Keep connection alive while waiting for viewer
+                    // 🔥 KEEP ALIVE: Render Free Tier needs data every few seconds
                     send_ws_text("2"); 
-                    Sleep(10000); 
+                    Sleep(3000); // 10000 se hata kar 3000 kar diya (Bug Fix)
                 }
             }
         } else {

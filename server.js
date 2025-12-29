@@ -73,7 +73,7 @@ io.on("connection", (socket) => {
         const userId = data.userId.toString();
         
         // 🔥 FIXED: Check both name and an explicit isAgent flag for better detection
-        const isAgent = (data.name === "Agent Sharer" || data.name === "Remote Agent" || data.isAgent === true);
+        const isAgent = (data.name === "Agent Sharer" || data.isAgent === true);
         const storageKey = isAgent ? `${userId}_agent` : userId;
 
         activeUsers.set(storageKey, {
@@ -82,14 +82,15 @@ io.on("connection", (socket) => {
             isAgent: isAgent,
             originalId: userId 
         });
-
+        
+        console.log(`✅ ${isAgent ? 'AGENT' : 'USER'} Registered: ${storageKey}`);
         try {
             await User.findByIdAndUpdate(userId, { isOnline: true });
         } catch (err) {
             console.log("❌ DB Update Error:", err.message);
         }
 
-        console.log(`✅ ${isAgent ? 'AGENT' : 'USER'} Registered: ${storageKey}`);
+  
         io.emit("update-user-list", getUserList());
         
         // Re-match logic
