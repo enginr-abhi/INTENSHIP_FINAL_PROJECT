@@ -71,7 +71,8 @@ io.on("connection", (socket) => {
     socket.on("user-online", async (data) => { 
         if (!data.userId) return;
         const userId = data.userId.toString();
-        const isAgent = data.name === "Agent Sharer";
+        // 🔥 FIX: Check  Agent connecting to server
+        const isAgent = (data.name === "Agent Sharer" || data.name === "Remote Agent");
         const storageKey = isAgent ? `${userId}_agent` : userId;
 
         if (activeUsers.has(storageKey)) {
@@ -165,13 +166,12 @@ io.on("connection", (socket) => {
         console.log(`🔎 Searching for Agent with key: ${agentKey}`);
         console.log(`📡 Agent Found: ${agentTarget ? 'YES' : 'NO'}`);
        
-        const socketId = agentTarget ? agentTarget.socketId : activeUsers.get(data.targetId.toString())?.socketId;
+        // const socketId = agentTarget ? agentTarget.socketId : activeUsers.get(data.targetId.toString())?.socketId;
 
-        if (socketId) {
-            io.to(socketId).emit("receive-control-input", {
-                senderId: data.senderId,
-                event: data.event
-            });
+        if (agentTarget && agentTarget.socketId) {
+            io.to(agentTarget.socketId).emit("receive-control-input", data.event);
+        }else{
+            console.log(`❌ No Agent found for Target ID: ${data.targetId}`);
         }
     });
 

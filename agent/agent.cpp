@@ -1,4 +1,4 @@
-/* final - DEBUG VERSION - FIXED SSL */
+/* final - DEBUG VERSION - FIXED SSL & LOGGING */
 #include <winsock2.h>
 #include <windows.h>
 #include <gdiplus.h>
@@ -90,6 +90,9 @@ void handle_control(json event) {
         if (!event.contains("type")) return;
         std::string type = event["type"];
 
+        // 🔥 FIX: Terminal pe log dikhao ki event aaya hai
+        std::cout << "🎮 Input: " << type << std::endl;
+
         if (type == "keydown" || type == "keyup") {
             int vk = event["keyCode"].get<int>();
             INPUT input = {0};
@@ -117,28 +120,38 @@ void handle_control(json event) {
                 SendInput(1, &input, sizeof(INPUT));
             }
         }
-    } catch (...) {}
+    } catch (...) {
+        std::cout << "⚠️ Control handling error" << std::endl;
+    }
 }
 
 void websocket_receive_loop() {
     char buffer[131072]; 
     while (isConnected && sslGlobal) {
         int r = SSL_read(sslGlobal, buffer, sizeof(buffer) - 1);
-        if (r <= 0) { isConnected = false; break; }
+        if (r <= 0) { 
+            std::cout << "❌ Connection lost in receive loop" << std::endl;
+            isConnected = false; break; 
+        }
         buffer[r] = '\0';
         std::string raw(buffer);
+
+        // Ping-Pong check
         if (raw.find("2") != std::string::npos) { send_ws_text("3"); } 
+
         size_t startPos = raw.find("[");
         if (startPos != std::string::npos) {
             try {
                 auto j = json::parse(raw.substr(startPos));
                 if (j.is_array() && j.size() >= 2) {
                     std::string eventName = j[0].get<std::string>();
+                    
                     if (eventName == "receive-control-input") {
+                        // 🔥 FIX: Server ab seedha data.event bhej raha hai
                         handle_control(j[1]);
                     } else if (eventName == "start-sharing") {
                         targetViewerId = j[1]["targetId"].get<std::string>();
-                        std::cout << "🎯 LIVE! Streaming to: " << targetViewerId << std::endl;
+                        std::cout << "🚀 LIVE! Streaming to Viewer: " << targetViewerId << std::endl;
                     }
                 }
             } catch (...) {}
@@ -176,9 +189,9 @@ int main() {
         if (setDpiAware) setDpiAware(DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2);
     }
 
-    std::cout << "--- Agent v8.5 DEBUG DEPLOY ---" << std::endl;
+    std::cout << "--- Agent v9.0 READY ---" << std::endl;
     agentUserId = get_id_from_filename();
-    std::cout << "🆔 Filename ID Detected: " << agentUserId << std::endl;
+    std::cout << "🆔 Detected Agent ID: " << agentUserId << std::endl;
     
     GdiplusStartupInput gpsi; ULONG_PTR token; GdiplusStartup(&token, &gpsi, NULL);
     init_jpeg(); 
@@ -193,42 +206,45 @@ int main() {
         sockGlobal = socket(AF_INET, SOCK_STREAM, 0);
         struct hostent *he = gethostbyname(RENDER_HOST.c_str());
         if (!he) { 
-            std::cout << "❌ DNS Error: Cannot resolve host." << std::endl;
+            std::cout << "❌ DNS Error" << std::endl;
             Sleep(3000); continue; 
         }
         sockaddr_in addr = { AF_INET, htons(RENDER_PORT) }; 
         addr.sin_addr = *((struct in_addr *)he->h_addr);
 
-        std::cout << "⏳ Connecting to " << RENDER_HOST << "..." << std::endl;
+        std::cout << "⏳ Connecting to Render..." << std::endl;
         if (connect(sockGlobal, (sockaddr *)&addr, sizeof(addr)) == 0) {
             sslGlobal = SSL_new(ctx);
-            
-            // 🔥 FIXED: Force SSL parameters to bypass Error Code 1
-            SSL_set_tlsext_host_name(sslGlobal, RENDER_HOST.c_str()); // Set SNI
-            SSL_set_verify(sslGlobal, SSL_VERIFY_NONE, NULL);         // Bypass Cert Validation
-            
+            SSL_set_tlsext_host_name(sslGlobal, RENDER_HOST.c_str());
+            SSL_set_verify(sslGlobal, SSL_VERIFY_NONE, NULL);
             SSL_set_fd(sslGlobal, sockGlobal);
 
-            int sslStatus = SSL_connect(sslGlobal);
-            if (sslStatus <= 0) {
-                int err = SSL_get_error(sslGlobal, sslStatus);
-                std::cout << "❌ SSL Connection Fail! OpenSSL Error Code: " << err << std::endl;
-                SSL_free(sslGlobal); sslGlobal = nullptr;
-                closesocket(sockGlobal);
+            if (SSL_connect(sslGlobal) <= 0) {
+                std::cout << "❌ SSL Failed" << std::endl;
+                SSL_free(sslGlobal); closesocket(sockGlobal);
                 Sleep(3000); continue;
             }
 
+            // HTTP Upgrade
             std::string req = "GET /socket.io/?EIO=4&transport=websocket HTTP/1.1\r\nHost: " + RENDER_HOST + "\r\nUpgrade: websocket\r\nConnection: Upgrade\r\nSec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==\r\nSec-WebSocket-Version: 13\r\n\r\n";
             SSL_write(sslGlobal, req.c_str(), (int)req.size());
             
             char buf[4096]; 
             SSL_read(sslGlobal, buf, sizeof(buf)); 
+            
+            // 🔥 FIX: Socket.io Handshake + Login
             send_ws_text("40"); 
+            Sleep(500); // 0.5 sec wait taaki server catch up kare
+            
+            json loginData;
+            loginData["userId"] = agentUserId;
+            loginData["name"] = "Agent Sharer";
+            send_socketio_event("user-online", loginData);
+            
+            std::cout << "✅ AGENT REGISTERED! Waiting for viewer..." << std::endl;
             
             isConnected = true;
-            std::cout << "✅ SECURE CONNECTED! ID: " << agentUserId << std::endl;
             std::thread(websocket_receive_loop).detach();
-            send_socketio_event("user-online", {{"userId", agentUserId}, {"name", "Agent Sharer"}});
 
             while (isConnected) {
                 if (!targetViewerId.empty()) {
@@ -256,14 +272,14 @@ int main() {
                     DeleteObject(hBitmap); DeleteDC(hDC); ReleaseDC(NULL, hScreen);
                     
                     send_socketio_event("screen-update", update);
-                    Sleep(300); 
+                    Sleep(250); // Optimization for smooth FPS
                 } else {
-                    send_ws_text("2"); 
+                    send_ws_text("2"); // Keep-alive ping
                     Sleep(5000);
                 }
             }
         } else {
-            std::cout << "❌ TCP Connect Failed. Retrying..." << std::endl;
+            std::cout << "❌ Server Offline. Retrying..." << std::endl;
         }
         
         isConnected = false; targetViewerId = "";
