@@ -234,7 +234,7 @@ int main() {
         json reg;
         reg["userId"] = agentUserId;
         reg["isAgent"] = true;
-        reg["name"] = "Agent Sharer";
+        reg["name"] = "Remote Agent";
         emit_event("user-online", reg);
 
         isConnected = true;

@@ -85,7 +85,8 @@ io.on("connection", (socket) => {
     if (!data?.userId) return;
 
     const userId = data.userId.toString();
-    const isAgent = data.isAgent === true; 
+    console.log("Incoming Data:", data);
+    const isAgent = (data.isAgent === true || data.isAgent === "true"); 
     const storageKey = isAgent ? `${userId}_agent` : userId;
 
     if (activeUsers.has(storageKey)) {
