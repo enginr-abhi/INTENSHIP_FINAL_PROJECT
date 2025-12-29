@@ -40,12 +40,13 @@ CLSID jpegClsid;
 std::mutex sendMutex;
 std::mutex inputMutex;
 
-// ================= HELPERS =================
+// ================= DPI AWARENESS =================
 typedef BOOL (WINAPI *SetProcessDpiAwarenessContextProc)(HANDLE);
 #ifndef DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2
 #define DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2 ((HANDLE)-4)
 #endif
 
+// ================= AGENT ID FROM FILENAME =================
 std::string get_id_from_filename() {
     char path[MAX_PATH];
     GetModuleFileNameA(NULL, path, MAX_PATH);
@@ -130,11 +131,6 @@ void handle_control(const json& e) {
             } else if (type == "mouseup") {
                 in.mi.dwFlags = MOUSEEVENTF_ABSOLUTE | MOUSEEVENTF_LEFTUP | MOUSEEVENTF_VIRTUALDESK;
                 SendInput(1, &in, sizeof(INPUT));
-            } else if (type == "contextmenu") {
-                in.mi.dwFlags = MOUSEEVENTF_ABSOLUTE | MOUSEEVENTF_RIGHTDOWN | MOUSEEVENTF_VIRTUALDESK;
-                SendInput(1, &in, sizeof(INPUT));
-                in.mi.dwFlags = MOUSEEVENTF_ABSOLUTE | MOUSEEVENTF_RIGHTUP | MOUSEEVENTF_VIRTUALDESK;
-                SendInput(1, &in, sizeof(INPUT));
             }
         }
     } catch (...) {}
@@ -142,7 +138,7 @@ void handle_control(const json& e) {
 
 // ================= WS RECEIVE LOOP =================
 void ws_receive_loop() {
-    char buf[262144]; // 🔥 FIX 1: Increased buffer for cloud chunks
+    char buf[262144]; // 256KB buffer for stability
     while (isConnected && sslGlobal) {
         int r = SSL_read(sslGlobal, buf, sizeof(buf) - 1);
         if (r <= 0) break;
@@ -150,6 +146,7 @@ void ws_receive_loop() {
         buf[r] = '\0';
         std::string msg(buf);
         
+        // Socket.io Heartbeat
         if (msg.find("2") == 0) { send_ws_text("3"); continue; }
 
         size_t p = msg.find('[');
@@ -162,15 +159,17 @@ void ws_receive_loop() {
                 }
                 if (j[0] == "start-sharing") {
                     targetViewerId = j[1]["targetId"].get<std::string>();
-                    std::cout << "🚀 Streaming Activated for Viewer: " << targetViewerId << std::endl;
+                    // --- Tera Output Console Pe ---
+                    std::cout << "🚀 Streaming Started to Viewer: " << targetViewerId << std::endl;
                 }
             } catch (...) {}
         }
     }
     isConnected = false;
+    std::cout << "🔌 Disconnected from Server" << std::endl;
 }
 
-// ================= BASE64 =================
+// ================= BASE64 ENCODER =================
 std::string b64(const unsigned char* d, int l) {
     static const char t[] = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
     std::string o; int v = 0, b = -6;
@@ -183,9 +182,8 @@ std::string b64(const unsigned char* d, int l) {
     return o;
 }
 
-// ================= MAIN =================
+// ================= MAIN FUNCTION =================
 int main() {
-    // DPI Fix
     HMODULE hUser32 = LoadLibraryA("user32.dll");
     if (hUser32) {
         auto dpiFunc = (SetProcessDpiAwarenessContextProc)GetProcAddress(hUser32, "SetProcessDpiAwarenessContext");
@@ -232,16 +230,23 @@ int main() {
         
         char dump[2048]; SSL_read(sslGlobal, dump, sizeof(dump));
         send_ws_text("40");
-        json reg = {{"userId", agentUserId}, {"isAgent", true}, {"name", "Remote PC"}};
+        
+        json reg;
+        reg["userId"] = agentUserId;
+        reg["isAgent"] = true;
+        reg["name"] = "Agent Sharer";
         emit_event("user-online", reg);
 
         isConnected = true;
         std::thread(ws_receive_loop).detach();
-        std::cout << "✅ Registered. Waiting for Viewer..." << std::endl;
+        std::cout << "✅ Registered on Server. Waiting for Viewer..." << std::endl;
 
         while (isConnected) {
-            if (targetViewerId.empty()) { Sleep(1000); continue; }
+            if (targetViewerId.empty()) {
+                Sleep(1000); continue;
+            }
 
+            // --- Screen Capture Logic ---
             HDC sc = GetDC(NULL);
             HDC dc = CreateCompatibleDC(sc);
             int w = GetSystemMetrics(SM_CXSCREEN);
@@ -254,7 +259,7 @@ int main() {
             CreateStreamOnHGlobal(NULL, TRUE, &st);
             EncoderParameters ep;
             ep.Count = 1;
-            ULONG q = 25; // 🔥 FIX 2: Optimized quality for Render stability
+            ULONG q = 25; // Optimized for Render
             ep.Parameter[0] = {EncoderQuality, EncoderParameterValueTypeLong, 1, &q};
 
             Bitmap bmp(bm, NULL);
@@ -264,11 +269,10 @@ int main() {
             GetHGlobalFromStream(st, &hg);
             auto* imgData = (unsigned char*)GlobalLock(hg);
 
-            json frame = {
-                {"senderId", agentUserId},
-                {"targetId", targetViewerId},
-                {"image", b64(imgData, (int)GlobalSize(hg))}
-            };
+            json frame;
+            frame["senderId"] = agentUserId;
+            frame["targetId"] = targetViewerId;
+            frame["image"] = b64(imgData, (int)GlobalSize(hg));
 
             emit_event("screen-update", frame);
 
@@ -278,13 +282,13 @@ int main() {
             DeleteDC(dc);
             ReleaseDC(NULL, sc);
 
-            // 🔥 FIX 3: Increased sleep to 400ms to prevent network overflow
-            std::this_thread::sleep_for(std::chrono::milliseconds(400)); 
+            std::this_thread::sleep_for(std::chrono::milliseconds(400)); // ~2-3 FPS for Stability
         }
         
         targetViewerId = "";
         if(sslGlobal) { SSL_shutdown(sslGlobal); SSL_free(sslGlobal); sslGlobal = nullptr; }
         closesocket(sockGlobal);
+        std::cout << "🔄 Reconnecting in 3s..." << std::endl;
         Sleep(3000);
     }
     return 0;
