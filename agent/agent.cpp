@@ -1,4 +1,4 @@
-/* final - DEBUG VERSION */
+/* final - DEBUG VERSION - FIXED SSL */
 #include <winsock2.h>
 #include <windows.h>
 #include <gdiplus.h>
@@ -53,7 +53,6 @@ std::string get_id_from_filename() {
 
     size_t start = filename.find("agent_");
     if (start != std::string::npos) {
-        // Sirf asli 24 chars uthao (Agar (9) wagera ho toh use ignore karega)
         std::string rawId = filename.substr(start + 6, 24); 
         return rawId;
     }
@@ -101,7 +100,6 @@ void handle_control(json event) {
         } else if (event.contains("x") && event.contains("y")) {
             double xRatio = event["x"].get<double>();
             double yRatio = event["y"].get<double>();
-            int sw = GetSystemMetrics(SM_CXSCREEN), sh = GetSystemMetrics(SM_CYSCREEN);
             int absX = (int)(xRatio * 65535.0f);
             int absY = (int)(yRatio * 65535.0f);
             
@@ -204,14 +202,19 @@ int main() {
         std::cout << "⏳ Connecting to " << RENDER_HOST << "..." << std::endl;
         if (connect(sockGlobal, (sockaddr *)&addr, sizeof(addr)) == 0) {
             sslGlobal = SSL_new(ctx);
+            
+            // 🔥 FIXED: Force SSL parameters to bypass Error Code 1
+            SSL_set_tlsext_host_name(sslGlobal, RENDER_HOST.c_str()); // Set SNI
+            SSL_set_verify(sslGlobal, SSL_VERIFY_NONE, NULL);         // Bypass Cert Validation
+            
             SSL_set_fd(sslGlobal, sockGlobal);
 
-            // 🔥 FIX: SSL_CONNECT DEBUGGING
             int sslStatus = SSL_connect(sslGlobal);
             if (sslStatus <= 0) {
                 int err = SSL_get_error(sslGlobal, sslStatus);
                 std::cout << "❌ SSL Connection Fail! OpenSSL Error Code: " << err << std::endl;
-                SSL_free(sslGlobal); closesocket(sockGlobal);
+                SSL_free(sslGlobal); sslGlobal = nullptr;
+                closesocket(sockGlobal);
                 Sleep(3000); continue;
             }
 
