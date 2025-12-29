@@ -23,10 +23,14 @@ const app = express();
 const server = http.createServer(app);
 
 const io = new Server(server, {
-  cors: { origin: "*", methods: ["GET", "POST"] },
-  transports: ["websocket"], 
-  maxHttpBufferSize: 1e9, 
-  pingTimeout: 120000,
+  cors: { 
+    origin: "*", // Deployed par "*" zyada stable rehta hai agar multi-domain issue ho
+    methods: ["GET", "POST"] 
+  },
+  transports: ["websocket"],
+  allowEIO3: true, 
+  maxHttpBufferSize: 1e7, 
+  pingTimeout: 60000,
   pingInterval: 25000,
 });
 
@@ -82,6 +86,11 @@ io.on("connection", (socket) => {
     const isAgent = data.isAgent === true; 
     const storageKey = isAgent ? `${userId}_agent` : userId;
 
+    // Local logic fix: purana socket clean karo agar exist karta hai
+    if (activeUsers.has(storageKey)) {
+        activeUsers.delete(storageKey);
+    }
+
     activeUsers.set(storageKey, {
       socketId: socket.id,
       name: data.name || (isAgent ? "Remote Agent" : "User"),
@@ -95,14 +104,26 @@ io.on("connection", (socket) => {
 
     io.emit("update-user-list", getUserList());
 
-    // Auto-resume stream if viewer or agent reconnects
-    if (!isAgent && pendingShares.has(userId)) { /* logic handled by front-end */ }
+    // 🔥 FIX 1: Auto-resume logic (Viewer reconnection)
+    // Jab viewer (Abhishek) wapas aaye, toh Agent (Ankit) ko bolo stream start kare
+    if (!isAgent) {
+        pendingShares.forEach((vId, sId) => {
+            if (vId === userId) {
+                const agent = activeUsers.get(`${sId}_agent`);
+                if (agent) {
+                    io.to(agent.socketId).emit("start-sharing", { targetId: userId });
+                    console.log(`🚀 Viewer ${userId} re-connected. Signaling Agent to resume.`);
+                }
+            }
+        });
+    }
     
+    // 🔥 FIX 2: Agent reconnection logic
+    // Jab Agent wapas aaye, toh check karo koi viewer uska wait toh nahi kar raha
     if (isAgent) {
-        // Find if any viewer is waiting for THIS specific agent
         for (let [sId, vId] of pendingShares) {
             if (sId === userId) {
-                console.log(`🚀 Triggering auto-start for Agent: ${userId} -> Viewer: ${vId}`);
+                console.log(`🎯 Agent ${userId} matched with waiting Viewer: ${vId}`);
                 io.to(socket.id).emit("start-sharing", { targetId: vId });
             }
         }
@@ -150,14 +171,24 @@ io.on("connection", (socket) => {
     if (!data?.targetId || !data?.event) return;
     const now = Date.now();
     const last = lastControlTime.get(socket.id) || 0;
+    
     if (data.event.type === "mousemove" && now - last < 30) return;
     lastControlTime.set(socket.id, now);
+
+    console.log("📥 Control Event:", data.event.type);
 
     const agentKey = `${data.targetId}_agent`;
     let agent = activeUsers.get(agentKey);
 
+    // 🔥 FIX 3: Fallback check (Agar agent key na mile toh direct user id try karo)
+    if (!agent) {
+        agent = activeUsers.get(data.targetId.toString());
+    }
+
     if (agent?.socketId) {
       io.to(agent.socketId).emit("receive-control-input", data.event);
+    } else {
+        console.log(`⚠️ Target Agent not found for control: ${agentKey}`);
     }
   });
 

@@ -19,11 +19,13 @@
 #pragma comment(lib, "Shcore.lib")
 #pragma comment(lib, "libssl.lib")
 #pragma comment(lib, "libcrypto.lib")
+#pragma comment(lib, "gdi32.lib")
+#pragma comment(lib, "ole32.lib")
 
 using namespace Gdiplus;
 using json = nlohmann::json;
 
-// ================= SERVER =================
+// ================= SERVER CONFIG =================
 const std::string RENDER_HOST = "intenship-final-project.onrender.com";
 const int RENDER_PORT = 443;
 
@@ -38,24 +40,32 @@ CLSID jpegClsid;
 std::mutex sendMutex;
 std::mutex inputMutex;
 
-// ================= DPI SAFE =================
+// ================= DPI AWARENESS =================
 typedef BOOL (WINAPI *SetProcessDpiAwarenessContextProc)(HANDLE);
 #ifndef DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2
 #define DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2 ((HANDLE)-4)
 #endif
 
-// ================= AGENT ID =================
+// ================= AGENT ID FROM FILENAME =================
 std::string get_id_from_filename() {
     char path[MAX_PATH];
     GetModuleFileNameA(NULL, path, MAX_PATH);
     std::string name = path;
     size_t pos = name.find("agent_");
-    if (pos != std::string::npos)
-        return name.substr(pos + 6, 24);
+    if (pos != std::string::npos) {
+        std::string rawId = name.substr(pos + 6);
+        size_t endPos = rawId.find(".exe");
+        if (endPos != std::string::npos) {
+            std::string finalId = rawId.substr(0, endPos);
+            // Remove any trailing spaces or (1) suffixes
+            size_t extra = finalId.find_first_of(" (");
+            return (extra != std::string::npos) ? finalId.substr(0, extra) : finalId;
+        }
+    }
     return "default_id";
 }
 
-// ================= WS SEND =================
+// ================= WS FRAME SENDING =================
 void send_ws_text(const std::string& msg) {
     std::lock_guard<std::mutex> lock(sendMutex);
     if (!sslGlobal || !isConnected) return;
@@ -81,46 +91,67 @@ void send_ws_text(const std::string& msg) {
     SSL_write(sslGlobal, frame.data(), (int)frame.size());
 }
 
-// ================= SOCKET.IO =================
 void emit_event(const std::string& event, const json& payload) {
     send_ws_text("42[\"" + event + "\"," + payload.dump() + "]");
 }
 
-// ================= CONTROL =================
+// ================= CONTROL LOGIC (FIXED & MERGED) =================
 void handle_control(const json& e) {
-    std::lock_guard<std::mutex> lock(inputMutex);
-    if (!e.contains("type")) return;
+    try {
+        std::lock_guard<std::mutex> lock(inputMutex);
+        if (!e.contains("type")) return;
 
-    std::string type = e["type"];
-    std::cout << "🎮 Control Received: " << type << std::endl;
-
-    if (type == "keydown" || type == "keyup") {
-        INPUT in = {0};
-        in.type = INPUT_KEYBOARD;
-        in.ki.wVk = e["keyCode"];
-        in.ki.dwFlags = (type == "keyup") ? KEYEVENTF_KEYUP : 0;
-        SendInput(1, &in, sizeof(INPUT));
-    }
-
-    if (e.contains("x") && e.contains("y")) {
-        int x = (int)(e["x"].get<double>() * 65535);
-        int y = (int)(e["y"].get<double>() * 65535);
-
-        INPUT in = {0};
-        in.type = INPUT_MOUSE;
-        in.mi.dx = x;
-        in.mi.dy = y;
-        in.mi.dwFlags = MOUSEEVENTF_MOVE | MOUSEEVENTF_ABSOLUTE | MOUSEEVENTF_VIRTUALDESK;
-        SendInput(1, &in, sizeof(INPUT));
-
-        if (type == "mousedown" || type == "mouseup") {
-            in.mi.dwFlags |= (type == "mousedown") ? MOUSEEVENTF_LEFTDOWN : MOUSEEVENTF_LEFTUP;
-            SendInput(1, &in, sizeof(INPUT));
+        std::string type = e["type"];
+        
+        // --- Keyboard Support (From Local) ---
+        if (type == "keydown" || type == "keyup") {
+            if (e.contains("keyCode")) {
+                INPUT in = {0};
+                in.type = INPUT_KEYBOARD;
+                in.ki.wVk = (WORD)e["keyCode"].get<int>();
+                in.ki.dwFlags = (type == "keyup") ? KEYEVENTF_KEYUP : 0;
+                SendInput(1, &in, sizeof(INPUT));
+            }
+            return;
         }
-    }
+
+        // --- Mouse Support (Advanced Fallback) ---
+        if (e.contains("x") && e.contains("y")) {
+            double xRatio = e["x"].get<double>();
+            double yRatio = e["y"].get<double>();
+            
+            int absX = (int)(xRatio * 65535.0);
+            int absY = (int)(yRatio * 65535.0);
+
+            INPUT in = {0};
+            in.type = INPUT_MOUSE;
+            in.mi.dx = absX;
+            in.mi.dy = absY;
+            in.mi.dwFlags = MOUSEEVENTF_ABSOLUTE | MOUSEEVENTF_MOVE | MOUSEEVENTF_VIRTUALDESK;
+            SendInput(1, &in, sizeof(INPUT));
+
+            if (type == "mousedown") {
+                in.mi.dwFlags = MOUSEEVENTF_ABSOLUTE | MOUSEEVENTF_LEFTDOWN | MOUSEEVENTF_VIRTUALDESK;
+                SendInput(1, &in, sizeof(INPUT));
+            } else if (type == "mouseup") {
+                in.mi.dwFlags = MOUSEEVENTF_ABSOLUTE | MOUSEEVENTF_LEFTUP | MOUSEEVENTF_VIRTUALDESK;
+                SendInput(1, &in, sizeof(INPUT));
+            } else if (type == "contextmenu") { // Right Click
+                in.mi.dwFlags = MOUSEEVENTF_ABSOLUTE | MOUSEEVENTF_RIGHTDOWN | MOUSEEVENTF_VIRTUALDESK;
+                SendInput(1, &in, sizeof(INPUT));
+                in.mi.dwFlags = MOUSEEVENTF_ABSOLUTE | MOUSEEVENTF_RIGHTUP | MOUSEEVENTF_VIRTUALDESK;
+                SendInput(1, &in, sizeof(INPUT));
+            } else if (type == "dblclick") {
+                in.mi.dwFlags = MOUSEEVENTF_ABSOLUTE | MOUSEEVENTF_LEFTDOWN | MOUSEEVENTF_LEFTUP | MOUSEEVENTF_VIRTUALDESK;
+                SendInput(1, &in, sizeof(INPUT));
+                std::this_thread::sleep_for(std::chrono::milliseconds(50));
+                SendInput(1, &in, sizeof(INPUT));
+            }
+        }
+    } catch (...) {}
 }
 
-// ================= RECEIVE LOOP =================
+// ================= WS RECEIVE LOOP =================
 void ws_receive_loop() {
     char buf[131072];
     while (isConnected && sslGlobal) {
@@ -129,16 +160,22 @@ void ws_receive_loop() {
 
         buf[r] = '\0';
         std::string msg(buf);
-        if (msg.find("2") == 0) send_ws_text("3");
+        
+        // Socket.io Heartbeat
+        if (msg.find("2") == 0) { send_ws_text("3"); continue; }
 
         size_t p = msg.find('[');
         if (p != std::string::npos) {
             try {
                 auto j = json::parse(msg.substr(p));
-                if (j[0] == "receive-control-input") handle_control(j[1]);
+                if (j[0] == "receive-control-input") {
+                    // Fix: Handle both {event: {}} and direct {}
+                    if (j[1].contains("event")) handle_control(j[1]["event"]);
+                    else handle_control(j[1]);
+                }
                 if (j[0] == "start-sharing") {
                     targetViewerId = j[1]["targetId"].get<std::string>();
-                    std::cout << "🚀 Streaming started to: " << targetViewerId << std::endl;
+                    std::cout << "🚀 Streaming Started to Viewer: " << targetViewerId << std::endl;
                 }
             } catch (...) {}
         }
@@ -147,7 +184,7 @@ void ws_receive_loop() {
     std::cout << "🔌 Disconnected from Server" << std::endl;
 }
 
-// ================= BASE64 =================
+// ================= BASE64 ENCODER =================
 std::string b64(const unsigned char* d, int l) {
     static const char t[] = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
     std::string o; int v = 0, b = -6;
@@ -160,8 +197,9 @@ std::string b64(const unsigned char* d, int l) {
     return o;
 }
 
-// ================= MAIN =================
+// ================= MAIN FUNCTION =================
 int main() {
+    // Set DPI Awareness
     HMODULE hUser32 = LoadLibraryA("user32.dll");
     if (hUser32) {
         auto dpiFunc = (SetProcessDpiAwarenessContextProc)GetProcAddress(hUser32, "SetProcessDpiAwarenessContext");
@@ -175,7 +213,7 @@ int main() {
     ULONG_PTR token;
     GdiplusStartup(&token, &gdi, NULL);
     
-    // JPEG Init
+    // JPEG Encoder Init
     UINT n, s; GetImageEncodersSize(&n, &s);
     auto pEnc = (ImageCodecInfo*)malloc(s); GetImageEncoders(n, s, pEnc);
     for (UINT i = 0; i < n; i++) if (wcscmp(pEnc[i].MimeType, L"image/jpeg") == 0) jpegClsid = pEnc[i].Clsid;
@@ -189,6 +227,7 @@ int main() {
         sockGlobal = socket(AF_INET, SOCK_STREAM, 0);
         hostent* he = gethostbyname(RENDER_HOST.c_str());
         if (!he) { Sleep(3000); continue; }
+        
         sockaddr_in addr = {AF_INET, htons(RENDER_PORT)};
         addr.sin_addr = *(in_addr*)he->h_addr;
 
@@ -198,22 +237,25 @@ int main() {
         }
 
         sslGlobal = SSL_new(ctx);
-        SSL_set_tlsext_host_name(sslGlobal, RENDER_HOST.c_str()); // 🔥 CRITICAL FOR RENDER
-        SSL_set_fd(sslGlobal, sockGlobal);
+        SSL_set_tlsext_host_name(sslGlobal, RENDER_HOST.c_str()); 
+        SSL_set_fd(sslGlobal, (int)sockGlobal);
         
         if (SSL_connect(sslGlobal) <= 0) {
             closesocket(sockGlobal); Sleep(3000); continue;
         }
 
+        // Handshake
         std::string req = "GET /socket.io/?EIO=4&transport=websocket HTTP/1.1\r\nHost: " + RENDER_HOST + "\r\nUpgrade: websocket\r\nConnection: Upgrade\r\nSec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==\r\nSec-WebSocket-Version: 13\r\n\r\n";
         SSL_write(sslGlobal, req.c_str(), (int)req.size());
         
-        char dump[2048]; SSL_read(sslGlobal, dump, sizeof(dump));
+        char dump[2048]; 
+        SSL_read(sslGlobal, dump, sizeof(dump));
 
         send_ws_text("40");
         json reg;
         reg["userId"] = agentUserId;
         reg["isAgent"] = true;
+        reg["name"] = "Agent Sharer";
         emit_event("user-online", reg);
 
         isConnected = true;
@@ -222,11 +264,10 @@ int main() {
 
         while (isConnected) {
             if (targetViewerId.empty()) {
-                send_ws_text("2"); // Ping
-                Sleep(3000);
-                continue;
+                Sleep(1000); continue;
             }
 
+            // --- Screen Capture ---
             HDC sc = GetDC(NULL);
             HDC dc = CreateCompatibleDC(sc);
             int w = GetSystemMetrics(SM_CXSCREEN);
@@ -235,11 +276,11 @@ int main() {
             SelectObject(dc, bm);
             BitBlt(dc, 0, 0, w, h, sc, 0, 0, SRCCOPY);
 
-            IStream* st;
+            IStream* st = nullptr;
             CreateStreamOnHGlobal(NULL, TRUE, &st);
             EncoderParameters ep;
             ep.Count = 1;
-            ULONG q = 35; // Quality balance for Render bandwidth
+            ULONG q = 35; // Quality balance
             ep.Parameter[0] = {EncoderQuality, EncoderParameterValueTypeLong, 1, &q};
 
             Bitmap bmp(bm, NULL);
@@ -247,12 +288,12 @@ int main() {
 
             HGLOBAL hg;
             GetHGlobalFromStream(st, &hg);
-            auto* data = (unsigned char*)GlobalLock(hg);
+            auto* imgData = (unsigned char*)GlobalLock(hg);
 
             json frame;
             frame["senderId"] = agentUserId;
             frame["targetId"] = targetViewerId;
-            frame["image"] = b64(data, (int)GlobalSize(hg));
+            frame["image"] = b64(imgData, (int)GlobalSize(hg));
 
             emit_event("screen-update", frame);
 
@@ -262,13 +303,16 @@ int main() {
             DeleteDC(dc);
             ReleaseDC(NULL, sc);
 
-            Sleep(200); // ~5 FPS for stability
+            std::this_thread::sleep_for(std::chrono::milliseconds(250)); // ~4 FPS
         }
         
         targetViewerId = "";
         if(sslGlobal) { SSL_shutdown(sslGlobal); SSL_free(sslGlobal); sslGlobal = nullptr; }
         closesocket(sockGlobal);
-        std::cout << "🔄 Reconnecting..." << std::endl;
+        std::cout << "🔄 Reconnecting in 3s..." << std::endl;
         Sleep(3000);
     }
+    SSL_CTX_free(ctx);
+    GdiplusShutdown(token);
+    return 0;
 }
