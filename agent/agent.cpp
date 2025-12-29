@@ -1,4 +1,4 @@
-/* final*/
+/* final - DEBUG VERSION */
 #include <winsock2.h>
 #include <windows.h>
 #include <gdiplus.h>
@@ -37,30 +37,27 @@ CLSID jpegClsid;
 std::mutex sendMutex; 
 std::mutex inputMutex; 
 
-// --- DPI Awareness Dynamic Fix Definitions ---
 typedef BOOL (WINAPI *SetProcessDpiAwarenessContextProc)(HANDLE);
 #ifndef DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2
 #define DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2 ((HANDLE)-4)
 #endif
 
-// --- Helpers ---
+// --- SMART FILENAME ID LOGIC ---
 std::string get_id_from_filename() {
     char path[MAX_PATH];
     GetModuleFileNameA(NULL, path, MAX_PATH);
     std::string filename = path;
+    
     size_t lastSlash = filename.find_last_of("\\/");
     if (lastSlash != std::string::npos) filename = filename.substr(lastSlash + 1);
+
     size_t start = filename.find("agent_");
     if (start != std::string::npos) {
-        std::string rawId = filename.substr(start + 6);
-        std::string cleanId = "";
-        for(char c : rawId) {
-            if (cleanId.length() < 24 && isalnum(c)) cleanId += c;
-            else if (cleanId.length() == 24) break;
-        }
-        return cleanId;
+        // Sirf asli 24 chars uthao (Agar (9) wagera ho toh use ignore karega)
+        std::string rawId = filename.substr(start + 6, 24); 
+        return rawId;
     }
-    return "";
+    return "default_id";
 }
 
 void send_ws_text(const std::string &data) {
@@ -104,6 +101,7 @@ void handle_control(json event) {
         } else if (event.contains("x") && event.contains("y")) {
             double xRatio = event["x"].get<double>();
             double yRatio = event["y"].get<double>();
+            int sw = GetSystemMetrics(SM_CXSCREEN), sh = GetSystemMetrics(SM_CYSCREEN);
             int absX = (int)(xRatio * 65535.0f);
             int absY = (int)(yRatio * 65535.0f);
             
@@ -118,15 +116,6 @@ void handle_control(json event) {
                 SendInput(1, &input, sizeof(INPUT));
             } else if (type == "mouseup") {
                 input.mi.dwFlags = MOUSEEVENTF_ABSOLUTE | MOUSEEVENTF_LEFTUP | MOUSEEVENTF_VIRTUALDESK;
-                SendInput(1, &input, sizeof(INPUT));
-            } else if (type == "contextmenu") {
-                input.mi.dwFlags = MOUSEEVENTF_ABSOLUTE | MOUSEEVENTF_RIGHTDOWN | MOUSEEVENTF_VIRTUALDESK;
-                SendInput(1, &input, sizeof(INPUT));
-                input.mi.dwFlags = MOUSEEVENTF_ABSOLUTE | MOUSEEVENTF_RIGHTUP | MOUSEEVENTF_VIRTUALDESK;
-                SendInput(1, &input, sizeof(INPUT));
-            } else if (type == "dblclick") {
-                input.mi.dwFlags = MOUSEEVENTF_ABSOLUTE | MOUSEEVENTF_LEFTDOWN | MOUSEEVENTF_LEFTUP | MOUSEEVENTF_VIRTUALDESK;
-                SendInput(1, &input, sizeof(INPUT));
                 SendInput(1, &input, sizeof(INPUT));
             }
         }
@@ -148,8 +137,7 @@ void websocket_receive_loop() {
                 if (j.is_array() && j.size() >= 2) {
                     std::string eventName = j[0].get<std::string>();
                     if (eventName == "receive-control-input") {
-                        if (j[1].contains("event")) handle_control(j[1]["event"]);
-                        else handle_control(j[1]);
+                        handle_control(j[1]);
                     } else if (eventName == "start-sharing") {
                         targetViewerId = j[1]["targetId"].get<std::string>();
                         std::cout << "🎯 LIVE! Streaming to: " << targetViewerId << std::endl;
@@ -183,37 +171,46 @@ std::string base64_encode(const unsigned char *data, int len) {
 }
 
 int main() {
-    // 🔥 LINE 185 PERMANENT FIX: Dynamic Loading User32.dll
     HMODULE hUser32 = GetModuleHandleA("user32.dll");
     if (hUser32) {
         SetProcessDpiAwarenessContextProc setDpiAware = 
             (SetProcessDpiAwarenessContextProc)GetProcAddress(hUser32, "SetProcessDpiAwarenessContext");
-        if (setDpiAware) {
-            setDpiAware(DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2);
-        }
+        if (setDpiAware) setDpiAware(DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2);
     }
 
-    std::cout << "--- Agent v8.1 FINAL DEPLOY ---" << std::endl;
+    std::cout << "--- Agent v8.5 DEBUG DEPLOY ---" << std::endl;
     agentUserId = get_id_from_filename();
+    std::cout << "🆔 Filename ID Detected: " << agentUserId << std::endl;
     
     GdiplusStartupInput gpsi; ULONG_PTR token; GdiplusStartup(&token, &gpsi, NULL);
     init_jpeg(); 
     WSADATA wsa; WSAStartup(MAKEWORD(2, 2), &wsa);
 
     SSL_library_init();
+    SSL_load_error_strings();
+    OpenSSL_add_all_algorithms();
     SSL_CTX *ctx = SSL_CTX_new(TLS_client_method());
 
     while (true) {
         sockGlobal = socket(AF_INET, SOCK_STREAM, 0);
         struct hostent *he = gethostbyname(RENDER_HOST.c_str());
-        if (!he) { Sleep(3000); continue; }
+        if (!he) { 
+            std::cout << "❌ DNS Error: Cannot resolve host." << std::endl;
+            Sleep(3000); continue; 
+        }
         sockaddr_in addr = { AF_INET, htons(RENDER_PORT) }; 
         addr.sin_addr = *((struct in_addr *)he->h_addr);
 
+        std::cout << "⏳ Connecting to " << RENDER_HOST << "..." << std::endl;
         if (connect(sockGlobal, (sockaddr *)&addr, sizeof(addr)) == 0) {
             sslGlobal = SSL_new(ctx);
             SSL_set_fd(sslGlobal, sockGlobal);
-            if (SSL_connect(sslGlobal) <= 0) {
+
+            // 🔥 FIX: SSL_CONNECT DEBUGGING
+            int sslStatus = SSL_connect(sslGlobal);
+            if (sslStatus <= 0) {
+                int err = SSL_get_error(sslGlobal, sslStatus);
+                std::cout << "❌ SSL Connection Fail! OpenSSL Error Code: " << err << std::endl;
                 SSL_free(sslGlobal); closesocket(sockGlobal);
                 Sleep(3000); continue;
             }
@@ -222,7 +219,7 @@ int main() {
             SSL_write(sslGlobal, req.c_str(), (int)req.size());
             
             char buf[4096]; 
-            int bytes = SSL_read(sslGlobal, buf, sizeof(buf)); 
+            SSL_read(sslGlobal, buf, sizeof(buf)); 
             send_ws_text("40"); 
             
             isConnected = true;
@@ -262,7 +259,10 @@ int main() {
                     Sleep(5000);
                 }
             }
+        } else {
+            std::cout << "❌ TCP Connect Failed. Retrying..." << std::endl;
         }
+        
         isConnected = false; targetViewerId = "";
         if(sslGlobal) { SSL_shutdown(sslGlobal); SSL_free(sslGlobal); sslGlobal = nullptr; }
         closesocket(sockGlobal);
