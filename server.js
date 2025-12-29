@@ -5,7 +5,7 @@ const session = require("express-session");
 const MongoDBStore = require("connect-mongodb-session")(session);
 const { Server } = require("socket.io");
 const mongoose = require("mongoose");
-const User = require('./models/user'); // Ya jo bhi tera model path hai
+const User = require('./models/user'); 
 
 const homeRouter = require("./routes/homeRouter");
 const authRouter = require("./routes/authRouter");
@@ -71,13 +71,10 @@ io.on("connection", (socket) => {
     socket.on("user-online", async (data) => { 
         if (!data.userId) return;
         const userId = data.userId.toString();
-        // 🔥 FIX: Check  Agent connecting to server
-        const isAgent = (data.name === "Agent Sharer" || data.name === "Remote Agent");
+        
+        // 🔥 FIXED: Check both name and an explicit isAgent flag for better detection
+        const isAgent = (data.name === "Agent Sharer" || data.name === "Remote Agent" || data.isAgent === true);
         const storageKey = isAgent ? `${userId}_agent` : userId;
-
-        if (activeUsers.has(storageKey)) {
-            activeUsers.delete(storageKey);
-        }
 
         activeUsers.set(storageKey, {
             socketId: socket.id,
@@ -92,27 +89,26 @@ io.on("connection", (socket) => {
             console.log("❌ DB Update Error:", err.message);
         }
 
-        console.log(`✅ ${isAgent ? 'AGENT' : 'USER'} Online: ${userId}`);
+        console.log(`✅ ${isAgent ? 'AGENT' : 'USER'} Registered: ${storageKey}`);
         io.emit("update-user-list", getUserList());
-       
+        
+        // Re-match logic
         if (!isAgent) {
             pendingShares.forEach((vId, sId) => {
                 if (vId === userId) {
                     const agent = activeUsers.get(`${sId}_agent`);
                     if (agent) {
                         io.to(agent.socketId).emit("start-sharing", { targetId: userId });
-                        console.log(`🚀 Viewer (Abhishek) Re-connected. Telling Agent (Ankit) to start!`);
+                        console.log(`🚀 Viewer Re-connected. Starting Agent: ${sId}`);
                     }
                 }
             });
         }
 
-        // FIX: Agar Agent online aaya aur viewer pehle se wait kar raha hai
         if (isAgent && pendingShares.has(userId)) {
-            const viewerId = pendingShares.get(userId);;
-            // Agent ko Viewer ki MongoDB ID bhejo (Socket ID nahi!)
-        io.to(socket.id).emit("start-sharing", { targetId: viewerId });
-        console.log(`🎯 Re-matched Agent ${userId} matched with Viewer ${viewerId}`);
+            const viewerId = pendingShares.get(userId);
+            io.to(socket.id).emit("start-sharing", { targetId: viewerId });
+            console.log(`🎯 Re-matched Agent ${userId} with Viewer ${viewerId}`);
         }
     });
 
@@ -124,7 +120,6 @@ io.on("connection", (socket) => {
                 senderId: data.senderId, 
                 senderName: data.senderName 
             });
-            console.log(`📩 Request: ${data.senderName} -> ${targetId}`);
         }
     });
 
@@ -137,7 +132,12 @@ io.on("connection", (socket) => {
         if (viewer) {
             io.to(viewer.socketId).emit("redirect-to-view", { sharerId: sharerId });
         }
-        console.log(`🤝 Accepted: Sharer ${sharerId} -> Viewer ${viewerId}`);
+        
+        // Agar agent pehle se online hai, toh usey turant batao
+        const agent = activeUsers.get(`${sharerId}_agent`);
+        if (agent) {
+            io.to(agent.socketId).emit("start-sharing", { targetId: viewerId });
+        }
     });
 
     socket.on("screen-update", (data) => {
@@ -153,25 +153,21 @@ io.on("connection", (socket) => {
 
     socket.on("control-input", (data) => {
         if (!data.targetId) return;
-        // Throttling logic (Old version )
-       const now = Date.now();
+        
+        const now = Date.now();
         const lastTime = lastControlTime.get(socket.id) || 0;
         if (data.event && data.event.type === 'mousemove') {
             if (now - lastTime < 30) return;
             lastControlTime.set(socket.id, now);
         }
-        console.log("📥 Control received on Server:", data.event);
+
         const agentKey = `${data.targetId}_agent`;
         const agentTarget = activeUsers.get(agentKey);
-        console.log(`🔎 Searching for Agent with key: ${agentKey}`);
-        console.log(`📡 Agent Found: ${agentTarget ? 'YES' : 'NO'}`);
-       
-        // const socketId = agentTarget ? agentTarget.socketId : activeUsers.get(data.targetId.toString())?.socketId;
 
         if (agentTarget && agentTarget.socketId) {
             io.to(agentTarget.socketId).emit("receive-control-input", data.event);
-        }else{
-            console.log(`❌ No Agent found for Target ID: ${data.targetId}`);
+        } else {
+            console.log(`❌ No Agent found for key: ${agentKey}`);
         }
     });
 
@@ -182,7 +178,6 @@ io.on("connection", (socket) => {
                 const actualId = info.originalId || key.replace('_agent', '');
                 await User.findByIdAndUpdate(actualId, { isOnline: false }).catch(() => {});
                 activeUsers.delete(key);
-                lastControlTime.delete(socket.id);
                 break;
             }
         }

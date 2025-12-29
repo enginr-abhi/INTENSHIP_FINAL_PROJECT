@@ -1,4 +1,4 @@
-/* final - DEBUG VERSION - FIXED SSL & LOGGING */
+/* final - FIXED VERSION - READY TO USE */
 #include <winsock2.h>
 #include <windows.h>
 #include <gdiplus.h>
@@ -90,8 +90,7 @@ void handle_control(json event) {
         if (!event.contains("type")) return;
         std::string type = event["type"];
 
-        // 🔥 FIX: Terminal pe log dikhao ki event aaya hai
-        std::cout << "🎮 Input: " << type << std::endl;
+        std::cout << "🎮 Input Action: " << type << std::endl;
 
         if (type == "keydown" || type == "keyup") {
             int vk = event["keyCode"].get<int>();
@@ -136,8 +135,8 @@ void websocket_receive_loop() {
         buffer[r] = '\0';
         std::string raw(buffer);
 
-        // Ping-Pong check
-        if (raw.find("2") != std::string::npos) { send_ws_text("3"); } 
+        // Ping-Pong check (Socket.io requirement)
+        if (raw.find("2") == 0) { send_ws_text("3"); } 
 
         size_t startPos = raw.find("[");
         if (startPos != std::string::npos) {
@@ -147,7 +146,6 @@ void websocket_receive_loop() {
                     std::string eventName = j[0].get<std::string>();
                     
                     if (eventName == "receive-control-input") {
-                        // 🔥 FIX: Server ab seedha data.event bhej raha hai
                         handle_control(j[1]);
                     } else if (eventName == "start-sharing") {
                         targetViewerId = j[1]["targetId"].get<std::string>();
@@ -189,7 +187,7 @@ int main() {
         if (setDpiAware) setDpiAware(DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2);
     }
 
-    std::cout << "--- Agent v9.0 READY ---" << std::endl;
+    std::cout << "--- Agent v10.0 FINAL FIX ---" << std::endl;
     agentUserId = get_id_from_filename();
     std::cout << "🆔 Detected Agent ID: " << agentUserId << std::endl;
     
@@ -232,13 +230,14 @@ int main() {
             char buf[4096]; 
             SSL_read(sslGlobal, buf, sizeof(buf)); 
             
-            // 🔥 FIX: Socket.io Handshake + Login
+            // 🔥 FIXED: Handshake + Registration with isAgent flag
             send_ws_text("40"); 
-            Sleep(500); // 0.5 sec wait taaki server catch up kare
+            Sleep(500); 
             
             json loginData;
             loginData["userId"] = agentUserId;
             loginData["name"] = "Agent Sharer";
+            loginData["isAgent"] = true; // 🔥 Server ab ise '_agent' key dega
             send_socketio_event("user-online", loginData);
             
             std::cout << "✅ AGENT REGISTERED! Waiting for viewer..." << std::endl;
@@ -272,10 +271,11 @@ int main() {
                     DeleteObject(hBitmap); DeleteDC(hDC); ReleaseDC(NULL, hScreen);
                     
                     send_socketio_event("screen-update", update);
-                    Sleep(250); // Optimization for smooth FPS
+                    Sleep(250); 
                 } else {
-                    send_ws_text("2"); // Keep-alive ping
-                    Sleep(5000);
+                    // 🔥 Keep connection alive while waiting for viewer
+                    send_ws_text("2"); 
+                    Sleep(10000); 
                 }
             }
         } else {
@@ -285,7 +285,7 @@ int main() {
         isConnected = false; targetViewerId = "";
         if(sslGlobal) { SSL_shutdown(sslGlobal); SSL_free(sslGlobal); sslGlobal = nullptr; }
         closesocket(sockGlobal);
-        std::cout << "🔄 Reconnecting..." << std::endl;
+        std::cout << "🔄 Reconnecting in 3s..." << std::endl;
         Sleep(3000);
     }
     return 0;
