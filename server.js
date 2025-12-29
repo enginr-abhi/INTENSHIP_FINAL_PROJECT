@@ -15,35 +15,25 @@ const rootDir = require("./utils/pathUtil");
 const errorsController = require("./controllers/error");
 
 // ====================== CONFIG ======================
-const DB_PATH =
-  "mongodb+srv://root:root@intenshipproject.otfahvy.mongodb.net/users?appName=intenshipProject";
+const DB_PATH = "mongodb+srv://root:root@intenshipproject.otfahvy.mongodb.net/users?appName=intenshipProject";
 const PORT = process.env.PORT || 8000;
 
 // ====================== APP + SERVER ======================
 const app = express();
 const server = http.createServer(app);
 
-/**
- * 🔥 IMPORTANT FIXES FOR DEPLOY
- * 1. Force WebSocket only (polling causes packet loss on Render)
- * 2. Increase buffer size for screen frames
- * 3. Stable ping config
- */
 const io = new Server(server, {
-  cors: {
-    origin: "*",
-    methods: ["GET", "POST"],
-  },
-  transports: ["websocket"], // ❌ polling removed
-  maxHttpBufferSize: 1e9, // 🔥 large screen frames
+  cors: { origin: "*", methods: ["GET", "POST"] },
+  transports: ["websocket"], 
+  maxHttpBufferSize: 1e9, 
   pingTimeout: 120000,
   pingInterval: 25000,
 });
 
 // ====================== RUNTIME STORES ======================
-const activeUsers = new Map(); // userId / userId_agent -> socket info
-const pendingShares = new Map(); // sharerId -> viewerId
-const lastControlTime = new Map(); // throttle mouse move
+const activeUsers = new Map(); 
+const pendingShares = new Map(); 
+const lastControlTime = new Map(); 
 
 // ====================== HELPERS ======================
 const getUserList = () =>
@@ -85,58 +75,40 @@ app.use(dashboardRouter);
 io.on("connection", (socket) => {
   console.log("🔌 New Connection:", socket.id);
 
-  /**
-   * ✅ USER / AGENT REGISTER
-   */
   socket.on("user-online", async (data) => {
     if (!data?.userId) return;
 
     const userId = data.userId.toString();
-    const isAgent = data.isAgent === true; // 🔥 ONLY reliable check
+    const isAgent = data.isAgent === true; 
     const storageKey = isAgent ? `${userId}_agent` : userId;
 
-    // overwrite old socket safely
     activeUsers.set(storageKey, {
       socketId: socket.id,
-      name: data.name || "User",
+      name: data.name || (isAgent ? "Remote Agent" : "User"),
       isAgent,
       originalId: userId,
     });
 
     console.log(`✅ ${isAgent ? "AGENT" : "USER"} Registered: ${storageKey}`);
 
-    try {
-      await User.findByIdAndUpdate(userId, { isOnline: true });
-    } catch {}
+    try { await User.findByIdAndUpdate(userId, { isOnline: true }); } catch {}
 
     io.emit("update-user-list", getUserList());
 
-    // viewer reconnect case
-    if (!isAgent) {
-      pendingShares.forEach((vId, sId) => {
-        if (vId === userId) {
-          const agent = activeUsers.get(`${sId}_agent`);
-          if (agent) {
-            io.to(agent.socketId).emit("start-sharing", {
-              targetId: userId,
-            });
-          }
+    // Auto-resume stream if viewer or agent reconnects
+    if (!isAgent && pendingShares.has(userId)) { /* logic handled by front-end */ }
+    
+    if (isAgent) {
+        // Find if any viewer is waiting for THIS specific agent
+        for (let [sId, vId] of pendingShares) {
+            if (sId === userId) {
+                console.log(`🚀 Triggering auto-start for Agent: ${userId} -> Viewer: ${vId}`);
+                io.to(socket.id).emit("start-sharing", { targetId: vId });
+            }
         }
-      });
-    }
-
-    // agent reconnect case
-    if (isAgent && pendingShares.has(userId)) {
-      const viewerId = pendingShares.get(userId);
-      io.to(socket.id).emit("start-sharing", {
-        targetId: viewerId,
-      });
     }
   });
 
-  /**
-   * 📩 SHARE REQUEST
-   */
   socket.on("send-share-request", (data) => {
     const target = getUser(data.targetId?.toString());
     if (target?.socketId) {
@@ -147,9 +119,6 @@ io.on("connection", (socket) => {
     }
   });
 
-  /**
-   * 🤝 ACCEPT REQUEST
-   */
   socket.on("request-accepted", (data) => {
     const sharerId = data.sharerId.toString();
     const viewerId = data.viewerId.toString();
@@ -157,24 +126,17 @@ io.on("connection", (socket) => {
     pendingShares.set(sharerId, viewerId);
 
     const viewer = getUser(viewerId);
-    if (viewer) {
-      io.to(viewer.socketId).emit("redirect-to-view", { sharerId });
-    }
+    if (viewer) io.to(viewer.socketId).emit("redirect-to-view", { sharerId });
 
     const agent = activeUsers.get(`${sharerId}_agent`);
     if (agent) {
-      io.to(agent.socketId).emit("start-sharing", {
-        targetId: viewerId,
-      });
+      console.log(`🤝 Acceptance Sent to Agent: ${agent.socketId}`);
+      io.to(agent.socketId).emit("start-sharing", { targetId: viewerId });
     }
   });
 
-  /**
-   * 🖥️ SCREEN DATA
-   */
   socket.on("screen-update", (data) => {
     if (!data?.targetId || !data?.image) return;
-
     const target = getUser(data.targetId.toString());
     if (target?.socketId) {
       io.to(target.socketId).emit("receive-screen-data", {
@@ -184,13 +146,8 @@ io.on("connection", (socket) => {
     }
   });
 
-  /**
-   * 🎮 CONTROL INPUT (FIXED)
-   */
   socket.on("control-input", (data) => {
     if (!data?.targetId || !data?.event) return;
-
-    // throttle mousemove
     const now = Date.now();
     const last = lastControlTime.get(socket.id) || 0;
     if (data.event.type === "mousemove" && now - last < 30) return;
@@ -199,39 +156,18 @@ io.on("connection", (socket) => {
     const agentKey = `${data.targetId}_agent`;
     let agent = activeUsers.get(agentKey);
 
-    // 🔥 DEMO-SAVER FALLBACK
-    if (!agent) {
-      for (const [, info] of activeUsers) {
-        if (info.isAgent && info.originalId === data.targetId) {
-          agent = info;
-          break;
-        }
-      }
-    }
-
     if (agent?.socketId) {
-      io.to(agent.socketId).emit(
-        "receive-control-input",
-        data.event
-      );
-    } else {
-      console.log(`❌ Agent NOT FOUND for ${data.targetId}`);
+      io.to(agent.socketId).emit("receive-control-input", data.event);
     }
   });
 
-  /**
-   * ❌ DISCONNECT
-   */
   socket.on("disconnect", async () => {
     for (const [key, info] of activeUsers.entries()) {
       if (info.socketId === socket.id) {
+        console.log(`❌ Disconnected: ${key}`);
         activeUsers.delete(key);
         lastControlTime.delete(socket.id);
-        try {
-          await User.findByIdAndUpdate(info.originalId, {
-            isOnline: false,
-          });
-        } catch {}
+        try { await User.findByIdAndUpdate(info.originalId, { isOnline: false }); } catch {}
         break;
       }
     }
@@ -239,16 +175,9 @@ io.on("connection", (socket) => {
   });
 });
 
-// ====================== ERROR ======================
 app.use(errorsController.pageNotFound);
 
-// ====================== DB + START ======================
-mongoose
-  .connect(DB_PATH)
-  .then(() => {
+mongoose.connect(DB_PATH).then(() => {
     console.log("✅ DB Connected");
-    server.listen(PORT, () =>
-      console.log(`🚀 Server running on ${PORT}`)
-    );
-  })
-  .catch((err) => console.log("❌ DB Error:", err));
+    server.listen(PORT, () => console.log(`🚀 Server running on ${PORT}`));
+}).catch((err) => console.log("❌ DB Error:", err));
