@@ -24,12 +24,12 @@ const server = http.createServer(app);
 
 const io = new Server(server, {
   cors: { 
-    origin: "*", // Deployed par "*" zyada stable rehta hai agar multi-domain issue ho
+    origin: "*", 
     methods: ["GET", "POST"] 
   },
-  transports: ["websocket"],
+  transports: ["websocket", "polling"], // Polling fallback for stability
   allowEIO3: true, 
-  maxHttpBufferSize: 1e7, 
+  maxHttpBufferSize: 1e8, // 🔥 FIX: 100MB limit for high-res images
   pingTimeout: 60000,
   pingInterval: 25000,
 });
@@ -56,8 +56,10 @@ app.set("views", "views");
 
 const store = new MongoDBStore({ uri: DB_PATH, collection: "sessions" });
 
+// 🔥 FIX: Ensure these are BEFORE routes
 app.use(express.json({ limit: "50mb" }));
 app.use(express.urlencoded({ extended: true, limit: "50mb" }));
+
 app.use(
   session({
     secret: "myIntenship",
@@ -86,7 +88,6 @@ io.on("connection", (socket) => {
     const isAgent = data.isAgent === true; 
     const storageKey = isAgent ? `${userId}_agent` : userId;
 
-    // Local logic fix: purana socket clean karo agar exist karta hai
     if (activeUsers.has(storageKey)) {
         activeUsers.delete(storageKey);
     }
@@ -104,22 +105,19 @@ io.on("connection", (socket) => {
 
     io.emit("update-user-list", getUserList());
 
-    // 🔥 FIX 1: Auto-resume logic (Viewer reconnection)
-    // Jab viewer (Abhishek) wapas aaye, toh Agent (Ankit) ko bolo stream start kare
+    // Auto-resume logic
     if (!isAgent) {
         pendingShares.forEach((vId, sId) => {
             if (vId === userId) {
-                const agent = activeUsers.get(`${sId}_agent`);
+                let agent = activeUsers.get(`${sId}_agent`) || activeUsers.get(sId);
                 if (agent) {
                     io.to(agent.socketId).emit("start-sharing", { targetId: userId });
-                    console.log(`🚀 Viewer ${userId} re-connected. Signaling Agent to resume.`);
+                    console.log(`🚀 Signaling Agent to resume stream for Viewer ${userId}`);
                 }
             }
         });
     }
     
-    // 🔥 FIX 2: Agent reconnection logic
-    // Jab Agent wapas aaye, toh check karo koi viewer uska wait toh nahi kar raha
     if (isAgent) {
         for (let [sId, vId] of pendingShares) {
             if (sId === userId) {
@@ -149,10 +147,18 @@ io.on("connection", (socket) => {
     const viewer = getUser(viewerId);
     if (viewer) io.to(viewer.socketId).emit("redirect-to-view", { sharerId });
 
-    const agent = activeUsers.get(`${sharerId}_agent`);
+    // 🔥 FIX: Robust Agent Lookup (Suffix check + Fallback)
+    let agent = activeUsers.get(`${sharerId}_agent`);
+    if (!agent) {
+        console.log("⚠️ Agent key not found with _agent suffix, trying direct ID...");
+        agent = activeUsers.get(sharerId);
+    }
+
     if (agent) {
-      console.log(`🤝 Acceptance Sent to Agent: ${agent.socketId}`);
+      console.log(`🤝 Acceptance Sent to Agent Socket: ${agent.socketId}`);
       io.to(agent.socketId).emit("start-sharing", { targetId: viewerId });
+    } else {
+      console.log(`❌ ERROR: No Agent online for Sharer ID: ${sharerId}`);
     }
   });
 
@@ -160,6 +166,7 @@ io.on("connection", (socket) => {
     if (!data?.targetId || !data?.image) return;
     const target = getUser(data.targetId.toString());
     if (target?.socketId) {
+      // Logic check: only send to the intended viewer
       io.to(target.socketId).emit("receive-screen-data", {
         senderId: data.senderId,
         image: data.image,
@@ -172,23 +179,14 @@ io.on("connection", (socket) => {
     const now = Date.now();
     const last = lastControlTime.get(socket.id) || 0;
     
-    if (data.event.type === "mousemove" && now - last < 30) return;
+    if (data.event.type === "mousemove" && now - last < 35) return;
     lastControlTime.set(socket.id, now);
 
-    console.log("📥 Control Event:", data.event.type);
-
     const agentKey = `${data.targetId}_agent`;
-    let agent = activeUsers.get(agentKey);
-
-    // 🔥 FIX 3: Fallback check (Agar agent key na mile toh direct user id try karo)
-    if (!agent) {
-        agent = activeUsers.get(data.targetId.toString());
-    }
+    let agent = activeUsers.get(agentKey) || activeUsers.get(data.targetId.toString());
 
     if (agent?.socketId) {
       io.to(agent.socketId).emit("receive-control-input", data.event);
-    } else {
-        console.log(`⚠️ Target Agent not found for control: ${agentKey}`);
     }
   });
 

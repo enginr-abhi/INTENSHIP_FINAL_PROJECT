@@ -40,13 +40,12 @@ CLSID jpegClsid;
 std::mutex sendMutex;
 std::mutex inputMutex;
 
-// ================= DPI AWARENESS =================
+// ================= HELPERS =================
 typedef BOOL (WINAPI *SetProcessDpiAwarenessContextProc)(HANDLE);
 #ifndef DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2
 #define DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2 ((HANDLE)-4)
 #endif
 
-// ================= AGENT ID FROM FILENAME =================
 std::string get_id_from_filename() {
     char path[MAX_PATH];
     GetModuleFileNameA(NULL, path, MAX_PATH);
@@ -57,7 +56,6 @@ std::string get_id_from_filename() {
         size_t endPos = rawId.find(".exe");
         if (endPos != std::string::npos) {
             std::string finalId = rawId.substr(0, endPos);
-            // Remove any trailing spaces or (1) suffixes
             size_t extra = finalId.find_first_of(" (");
             return (extra != std::string::npos) ? finalId.substr(0, extra) : finalId;
         }
@@ -95,15 +93,13 @@ void emit_event(const std::string& event, const json& payload) {
     send_ws_text("42[\"" + event + "\"," + payload.dump() + "]");
 }
 
-// ================= CONTROL LOGIC (FIXED & MERGED) =================
+// ================= CONTROL LOGIC =================
 void handle_control(const json& e) {
     try {
         std::lock_guard<std::mutex> lock(inputMutex);
         if (!e.contains("type")) return;
-
         std::string type = e["type"];
         
-        // --- Keyboard Support (From Local) ---
         if (type == "keydown" || type == "keyup") {
             if (e.contains("keyCode")) {
                 INPUT in = {0};
@@ -115,11 +111,9 @@ void handle_control(const json& e) {
             return;
         }
 
-        // --- Mouse Support (Advanced Fallback) ---
         if (e.contains("x") && e.contains("y")) {
             double xRatio = e["x"].get<double>();
             double yRatio = e["y"].get<double>();
-            
             int absX = (int)(xRatio * 65535.0);
             int absY = (int)(yRatio * 65535.0);
 
@@ -136,15 +130,10 @@ void handle_control(const json& e) {
             } else if (type == "mouseup") {
                 in.mi.dwFlags = MOUSEEVENTF_ABSOLUTE | MOUSEEVENTF_LEFTUP | MOUSEEVENTF_VIRTUALDESK;
                 SendInput(1, &in, sizeof(INPUT));
-            } else if (type == "contextmenu") { // Right Click
+            } else if (type == "contextmenu") {
                 in.mi.dwFlags = MOUSEEVENTF_ABSOLUTE | MOUSEEVENTF_RIGHTDOWN | MOUSEEVENTF_VIRTUALDESK;
                 SendInput(1, &in, sizeof(INPUT));
                 in.mi.dwFlags = MOUSEEVENTF_ABSOLUTE | MOUSEEVENTF_RIGHTUP | MOUSEEVENTF_VIRTUALDESK;
-                SendInput(1, &in, sizeof(INPUT));
-            } else if (type == "dblclick") {
-                in.mi.dwFlags = MOUSEEVENTF_ABSOLUTE | MOUSEEVENTF_LEFTDOWN | MOUSEEVENTF_LEFTUP | MOUSEEVENTF_VIRTUALDESK;
-                SendInput(1, &in, sizeof(INPUT));
-                std::this_thread::sleep_for(std::chrono::milliseconds(50));
                 SendInput(1, &in, sizeof(INPUT));
             }
         }
@@ -153,7 +142,7 @@ void handle_control(const json& e) {
 
 // ================= WS RECEIVE LOOP =================
 void ws_receive_loop() {
-    char buf[131072];
+    char buf[262144]; // 🔥 FIX 1: Increased buffer for cloud chunks
     while (isConnected && sslGlobal) {
         int r = SSL_read(sslGlobal, buf, sizeof(buf) - 1);
         if (r <= 0) break;
@@ -161,7 +150,6 @@ void ws_receive_loop() {
         buf[r] = '\0';
         std::string msg(buf);
         
-        // Socket.io Heartbeat
         if (msg.find("2") == 0) { send_ws_text("3"); continue; }
 
         size_t p = msg.find('[');
@@ -169,22 +157,20 @@ void ws_receive_loop() {
             try {
                 auto j = json::parse(msg.substr(p));
                 if (j[0] == "receive-control-input") {
-                    // Fix: Handle both {event: {}} and direct {}
                     if (j[1].contains("event")) handle_control(j[1]["event"]);
                     else handle_control(j[1]);
                 }
                 if (j[0] == "start-sharing") {
                     targetViewerId = j[1]["targetId"].get<std::string>();
-                    std::cout << "🚀 Streaming Started to Viewer: " << targetViewerId << std::endl;
+                    std::cout << "🚀 Streaming Activated for Viewer: " << targetViewerId << std::endl;
                 }
             } catch (...) {}
         }
     }
     isConnected = false;
-    std::cout << "🔌 Disconnected from Server" << std::endl;
 }
 
-// ================= BASE64 ENCODER =================
+// ================= BASE64 =================
 std::string b64(const unsigned char* d, int l) {
     static const char t[] = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
     std::string o; int v = 0, b = -6;
@@ -197,9 +183,9 @@ std::string b64(const unsigned char* d, int l) {
     return o;
 }
 
-// ================= MAIN FUNCTION =================
+// ================= MAIN =================
 int main() {
-    // Set DPI Awareness
+    // DPI Fix
     HMODULE hUser32 = LoadLibraryA("user32.dll");
     if (hUser32) {
         auto dpiFunc = (SetProcessDpiAwarenessContextProc)GetProcAddress(hUser32, "SetProcessDpiAwarenessContext");
@@ -213,7 +199,6 @@ int main() {
     ULONG_PTR token;
     GdiplusStartup(&token, &gdi, NULL);
     
-    // JPEG Encoder Init
     UINT n, s; GetImageEncodersSize(&n, &s);
     auto pEnc = (ImageCodecInfo*)malloc(s); GetImageEncoders(n, s, pEnc);
     for (UINT i = 0; i < n; i++) if (wcscmp(pEnc[i].MimeType, L"image/jpeg") == 0) jpegClsid = pEnc[i].Clsid;
@@ -240,34 +225,23 @@ int main() {
         SSL_set_tlsext_host_name(sslGlobal, RENDER_HOST.c_str()); 
         SSL_set_fd(sslGlobal, (int)sockGlobal);
         
-        if (SSL_connect(sslGlobal) <= 0) {
-            closesocket(sockGlobal); Sleep(3000); continue;
-        }
+        if (SSL_connect(sslGlobal) <= 0) { closesocket(sockGlobal); Sleep(3000); continue; }
 
-        // Handshake
         std::string req = "GET /socket.io/?EIO=4&transport=websocket HTTP/1.1\r\nHost: " + RENDER_HOST + "\r\nUpgrade: websocket\r\nConnection: Upgrade\r\nSec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==\r\nSec-WebSocket-Version: 13\r\n\r\n";
         SSL_write(sslGlobal, req.c_str(), (int)req.size());
         
-        char dump[2048]; 
-        SSL_read(sslGlobal, dump, sizeof(dump));
-
+        char dump[2048]; SSL_read(sslGlobal, dump, sizeof(dump));
         send_ws_text("40");
-        json reg;
-        reg["userId"] = agentUserId;
-        reg["isAgent"] = true;
-        reg["name"] = "Agent Sharer";
+        json reg = {{"userId", agentUserId}, {"isAgent", true}, {"name", "Remote PC"}};
         emit_event("user-online", reg);
 
         isConnected = true;
         std::thread(ws_receive_loop).detach();
-        std::cout << "✅ Registered on Server. Waiting for Viewer..." << std::endl;
+        std::cout << "✅ Registered. Waiting for Viewer..." << std::endl;
 
         while (isConnected) {
-            if (targetViewerId.empty()) {
-                Sleep(1000); continue;
-            }
+            if (targetViewerId.empty()) { Sleep(1000); continue; }
 
-            // --- Screen Capture ---
             HDC sc = GetDC(NULL);
             HDC dc = CreateCompatibleDC(sc);
             int w = GetSystemMetrics(SM_CXSCREEN);
@@ -280,7 +254,7 @@ int main() {
             CreateStreamOnHGlobal(NULL, TRUE, &st);
             EncoderParameters ep;
             ep.Count = 1;
-            ULONG q = 35; // Quality balance
+            ULONG q = 25; // 🔥 FIX 2: Optimized quality for Render stability
             ep.Parameter[0] = {EncoderQuality, EncoderParameterValueTypeLong, 1, &q};
 
             Bitmap bmp(bm, NULL);
@@ -290,10 +264,11 @@ int main() {
             GetHGlobalFromStream(st, &hg);
             auto* imgData = (unsigned char*)GlobalLock(hg);
 
-            json frame;
-            frame["senderId"] = agentUserId;
-            frame["targetId"] = targetViewerId;
-            frame["image"] = b64(imgData, (int)GlobalSize(hg));
+            json frame = {
+                {"senderId", agentUserId},
+                {"targetId", targetViewerId},
+                {"image", b64(imgData, (int)GlobalSize(hg))}
+            };
 
             emit_event("screen-update", frame);
 
@@ -303,16 +278,14 @@ int main() {
             DeleteDC(dc);
             ReleaseDC(NULL, sc);
 
-            std::this_thread::sleep_for(std::chrono::milliseconds(250)); // ~4 FPS
+            // 🔥 FIX 3: Increased sleep to 400ms to prevent network overflow
+            std::this_thread::sleep_for(std::chrono::milliseconds(400)); 
         }
         
         targetViewerId = "";
         if(sslGlobal) { SSL_shutdown(sslGlobal); SSL_free(sslGlobal); sslGlobal = nullptr; }
         closesocket(sockGlobal);
-        std::cout << "🔄 Reconnecting in 3s..." << std::endl;
         Sleep(3000);
     }
-    SSL_CTX_free(ctx);
-    GdiplusShutdown(token);
     return 0;
 }
