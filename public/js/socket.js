@@ -15,6 +15,7 @@
     window.socket = io(window.location.origin, {
         transports: ["websocket"],
         reconnection: true,
+        withCredentials: true,
         reconnectionAttempts: 20,
         reconnectionDelay: 3000,
     });

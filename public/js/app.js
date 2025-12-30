@@ -15,7 +15,7 @@ function handleDisconnect() {
 ====================================== */
 function sendControlEvent(e, sharerId, viewerId) {
     if (!window.location.pathname.startsWith("/view/")) return;
-    if (!sharerId || !viewerId || sharerId === "undefined") return; // Safety check
+    if (!sharerId || !viewerId) return; // Safety check
 
     const remoteVideo = document.getElementById("remote-video");
     if (!remoteVideo) return;
@@ -68,7 +68,9 @@ function sendControlEvent(e, sharerId, viewerId) {
             senderId: viewerId,
             event: eventPayload,
         });
+        console.log("🎮 CONTROL SENT TO SERVER:", eventPayload.type);
     }
+    
 }
 
 /* ======================================

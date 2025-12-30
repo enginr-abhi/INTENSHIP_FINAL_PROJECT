@@ -24,8 +24,8 @@ const server = http.createServer(app);
 
 const io = new Server(server, {
   cors: { 
-    origin: "*", 
-    methods: ["GET", "POST"] 
+    origin: true,
+    credentials: true,
   },
   transports: ["websocket", "polling"], // Polling fallback for stability
   allowEIO3: true, 
@@ -43,8 +43,8 @@ const lastControlTime = new Map();
 const getUserList = () =>
   Array.from(activeUsers)
     .filter(([_, info]) => !info.isAgent)
-    .map(([_, info]) => ({
-      userId: info.originalId,
+    .map(([userId, info]) => ({
+      userId: info.originalId || userId,
       name: info.name,
     }));
 
@@ -59,14 +59,19 @@ const store = new MongoDBStore({ uri: DB_PATH, collection: "sessions" });
 // 🔥 FIX: Ensure these are BEFORE routes
 app.use(express.json({ limit: "50mb" }));
 app.use(express.urlencoded({ extended: true, limit: "50mb" }));
-
+app.set("trust proxy", 1);
 app.use(
   session({
     secret: "myIntenship",
     resave: false,
     saveUninitialized: false,
     store,
-    cookie: { maxAge: 1000 * 60 * 60 * 24 },
+    cookie: {
+      maxAge: 1000 * 60 * 60 * 24,
+        secure: true,
+        sameSite: "none",
+    
+    },
   })
 );
 
@@ -86,7 +91,7 @@ io.on("connection", (socket) => {
 
     const userId = data.userId.toString();
     console.log("Incoming Data:", data);
-    const isAgent = (data.isAgent === true || data.isAgent === "true"); 
+    const isAgent = (data.isAgent === true || data.isAgent === "true" || data.name === "Agent Sharer"); 
     const storageKey = isAgent ? `${userId}_agent` : userId;
 
     if (activeUsers.has(storageKey)) {
@@ -187,7 +192,10 @@ io.on("connection", (socket) => {
     let agent = activeUsers.get(agentKey) || activeUsers.get(data.targetId.toString());
 
     if (agent?.socketId) {
-      io.to(agent.socketId).emit("receive-control-input", data.event);
+      io.to(agent.socketId).emit("receive-control-input", {
+  senderId: data.senderId,
+  event: data.event,
+});
     }
   });
 
